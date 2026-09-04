@@ -1,8 +1,23 @@
 import { useEffect, useRef } from 'react'
 
-const MAX_FIGHTERS = 5
+const MAX_FIGHTERS = 2
 const SPECTATOR_COUNT = 18
-const START_LIVES = 7
+const PLAYER_LIVES = 7
+const ENEMY_LIVES = 20
+const PLAYER_HIT_DAMAGE = 2
+const ENEMY_HIT_DAMAGE = 2
+const SHIELD_DURATION = 2500
+const SHIELD_USES_PER_ROUND = 3
+const STONE_SPEED = 14
+const STONE_DAMAGE = 1
+const STONE_COOLDOWN = 400
+const STONE_RADIUS = 10
+const BOMB_SPEED = 9
+const BOMB_DAMAGE = 3
+const BOMB_COOLDOWN = 900
+const BOMB_RADIUS = 14
+const BOMB_FUSE = 1.4
+const BOMB_BLAST = 110
 
 const PALETTE = [
   { color: '#ff4d3a', glow: '#ff8a70' },
@@ -34,6 +49,8 @@ function FightingBalls() {
 
     const particles = []
     const shocks = []
+    const stones = []
+    const bombs = []
     let shake = 0
     let flash = 0
     let cheer = 0
@@ -41,9 +58,20 @@ function FightingBalls() {
 
     const fighters = []
     const spectators = []
+    const keys = {
+      w: false,
+      a: false,
+      s: false,
+      d: false,
+      up: false,
+      left: false,
+      down: false,
+      right: false,
+    }
 
-    function makeFighter(x, y, vx, vy, paletteIndex) {
+    function makeFighter(x, y, vx, vy, paletteIndex, isPlayer = false) {
       const p = PALETTE[paletteIndex % PALETTE.length]
+      const maxLives = isPlayer ? PLAYER_LIVES : ENEMY_LIVES
       return {
         x,
         y,
@@ -56,16 +84,28 @@ function FightingBalls() {
         face: Math.random() > 0.5 ? 1 : -1,
         coolUntil: 0,
         hitUntil: 0,
-        lives: START_LIVES,
+        maxLives,
+        lives: maxLives,
+        player: isPlayer,
+        // red = player1 (WASD), blue = player2 (arrows)
+        control: isPlayer ? 'wasd' : paletteIndex === 1 ? 'arrows' : null,
+        shieldUntil: 0,
+        shieldUses: isPlayer ? SHIELD_USES_PER_ROUND : 0,
+        stoneReadyAt: 0,
+        bombReadyAt: 0,
       }
     }
 
     function resetFighters() {
       fighters.length = 0
+      stones.length = 0
+      bombs.length = 0
       fighters.push(
-        makeFighter(cx - arenaR * 0.25, cy, 6, -3, 0),
-        makeFighter(cx + arenaR * 0.25, cy, -6, 3, 1),
+        makeFighter(cx - arenaR * 0.25, cy, 0, 0, 0, true),
+        makeFighter(cx + arenaR * 0.25, cy, 0, 0, 1, false),
       )
+      // Blue is also human-controlled
+      fighters[1].control = 'arrows'
     }
 
     function placeSpectators() {
@@ -104,7 +144,7 @@ function FightingBalls() {
       cx = width * 0.5
       cy = height * 0.5
       arenaR = Math.min(width, height) * 0.48
-      ballR = Math.max(22, Math.min(48, arenaR * 0.12))
+      ballR = Math.max(36, Math.min(64, arenaR * 0.16))
       spectatorR = Math.max(12, Math.min(22, arenaR * 0.055))
       resetFighters()
       placeSpectators()
@@ -159,6 +199,211 @@ function FightingBalls() {
       })
     }
 
+    function throwStone(thrower) {
+      const now = performance.now()
+      if (now < thrower.stoneReadyAt) return
+
+      const target = fighters.find((f) => f !== thrower)
+      let dx = target ? target.x - thrower.x : thrower.vx
+      let dy = target ? target.y - thrower.y : thrower.vy
+      let dist = Math.hypot(dx, dy)
+      if (dist < 0.01) {
+        dx = thrower.face || 1
+        dy = 0
+        dist = 1
+      }
+      const nx = dx / dist
+      const ny = dy / dist
+
+      stones.push({
+        x: thrower.x + nx * (ballR + STONE_RADIUS),
+        y: thrower.y + ny * (ballR + STONE_RADIUS),
+        vx: nx * STONE_SPEED + thrower.vx * 0.3,
+        vy: ny * STONE_SPEED + thrower.vy * 0.3,
+        r: STONE_RADIUS,
+        life: 2.5,
+        owner: thrower,
+        spin: 0,
+      })
+      thrower.stoneReadyAt = now + STONE_COOLDOWN
+      thrower.squash = 0.25
+    }
+
+    function updateStones(dt, now) {
+      for (let i = stones.length - 1; i >= 0; i -= 1) {
+        const stone = stones[i]
+        stone.x += stone.vx * dt
+        stone.y += stone.vy * dt
+        stone.spin += 0.35 * dt
+        stone.life -= dt * 0.02
+
+        // Stay roughly in arena or despawn
+        const dx = stone.x - cx
+        const dy = stone.y - cy
+        if (Math.hypot(dx, dy) > arenaR + 40 || stone.life <= 0) {
+          stones.splice(i, 1)
+          continue
+        }
+
+        // Hit opponents
+        let hit = false
+        for (let j = 0; j < fighters.length; j += 1) {
+          const f = fighters[j]
+          if (f === stone.owner) continue
+          const d = Math.hypot(f.x - stone.x, f.y - stone.y)
+          if (d < ballR + stone.r) {
+            f.lives -= STONE_DAMAGE
+            f.squash = 0.5
+            f.vx += stone.vx * 0.25
+            f.vy += stone.vy * 0.25
+            spawnBurst(stone.x, stone.y, 1)
+            shake = Math.min(14, shake + 4)
+            hit = true
+            break
+          }
+        }
+        if (hit) stones.splice(i, 1)
+      }
+    }
+
+    function drawStone(stone) {
+      ctx.save()
+      ctx.translate(stone.x, stone.y)
+      ctx.rotate(stone.spin)
+      ctx.fillStyle = '#6b5b4a'
+      ctx.beginPath()
+      ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#8a7a66'
+      ctx.beginPath()
+      ctx.ellipse(-stone.r * 0.25, -stone.r * 0.25, stone.r * 0.45, stone.r * 0.35, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = '#3d342c'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
+    }
+
+    function throwBomb(thrower) {
+      const now = performance.now()
+      if (now < thrower.bombReadyAt) return
+
+      const target = fighters.find((f) => f !== thrower)
+      let dx = target ? target.x - thrower.x : thrower.vx
+      let dy = target ? target.y - thrower.y : thrower.vy
+      let dist = Math.hypot(dx, dy)
+      if (dist < 0.01) {
+        dx = -1
+        dy = 0
+        dist = 1
+      }
+      const nx = dx / dist
+      const ny = dy / dist
+
+      bombs.push({
+        x: thrower.x + nx * (ballR + BOMB_RADIUS),
+        y: thrower.y + ny * (ballR + BOMB_RADIUS),
+        vx: nx * BOMB_SPEED + thrower.vx * 0.2,
+        vy: ny * BOMB_SPEED + thrower.vy * 0.2,
+        r: BOMB_RADIUS,
+        fuse: BOMB_FUSE,
+        owner: thrower,
+        blink: 0,
+      })
+      thrower.bombReadyAt = now + BOMB_COOLDOWN
+      thrower.squash = 0.3
+    }
+
+    function explodeBomb(bomb) {
+      spawnBurst(bomb.x, bomb.y, 2.4)
+      shocks.push({ x: bomb.x, y: bomb.y, r: 12, max: BOMB_BLAST, life: 1 })
+      shake = Math.min(20, shake + 12)
+      flash = Math.min(0.6, flash + 0.3)
+      triggerCheer()
+
+      const now = performance.now()
+      for (let j = 0; j < fighters.length; j += 1) {
+        const f = fighters[j]
+        if (f === bomb.owner) continue
+        const d = Math.hypot(f.x - bomb.x, f.y - bomb.y)
+        if (d > BOMB_BLAST) continue
+        if (f.player && now < f.shieldUntil) continue
+        f.lives -= BOMB_DAMAGE
+        f.squash = 0.65
+        const push = (1 - d / BOMB_BLAST) * 8
+        const px = (f.x - bomb.x) / (d || 1)
+        const py = (f.y - bomb.y) / (d || 1)
+        f.vx += px * push
+        f.vy += py * push
+      }
+    }
+
+    function updateBombs(dt) {
+      for (let i = bombs.length - 1; i >= 0; i -= 1) {
+        const bomb = bombs[i]
+        bomb.vx *= 0.98
+        bomb.vy *= 0.98
+        bomb.x += bomb.vx * dt
+        bomb.y += bomb.vy * dt
+        bomb.fuse -= dt * 0.02
+        bomb.blink += dt * 0.25
+
+        const dx = bomb.x - cx
+        const dy = bomb.y - cy
+        const dist = Math.hypot(dx, dy)
+        if (dist > arenaR - 8) {
+          const nx = dx / dist
+          const ny = dy / dist
+          bomb.x = cx + nx * (arenaR - 8)
+          bomb.y = cy + ny * (arenaR - 8)
+          bomb.vx *= -0.4
+          bomb.vy *= -0.4
+        }
+
+        if (bomb.fuse <= 0) {
+          explodeBomb(bomb)
+          bombs.splice(i, 1)
+        }
+      }
+    }
+
+    function drawBomb(bomb) {
+      const urgent = bomb.fuse < 0.45
+      const pulse = 0.6 + Math.sin(bomb.blink * (urgent ? 8 : 3)) * 0.4
+      ctx.save()
+      ctx.translate(bomb.x, bomb.y)
+
+      ctx.fillStyle = `rgba(255, 80, 40, ${0.15 * pulse})`
+      ctx.beginPath()
+      ctx.arc(0, 0, bomb.r * 1.8, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.fillStyle = '#1a1a1a'
+      ctx.beginPath()
+      ctx.arc(0, 0, bomb.r, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = urgent ? `rgba(255,60,40,${pulse})` : '#2ec8ff'
+      ctx.beginPath()
+      ctx.arc(0, -bomb.r * 0.15, bomb.r * 0.35, 0, Math.PI * 2)
+      ctx.fill()
+
+      // Fuse spark
+      ctx.strokeStyle = '#c4a050'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(0, -bomb.r)
+      ctx.quadraticCurveTo(6, -bomb.r - 8, 2, -bomb.r - 14)
+      ctx.stroke()
+      ctx.fillStyle = `rgba(255, 200, 80, ${pulse})`
+      ctx.beginPath()
+      ctx.arc(2, -bomb.r - 14, 3, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.restore()
+    }
+
     function keepInArena(ball) {
       const limit = Math.max(16, arenaR - ballR - 6)
       const dx = ball.x - cx
@@ -195,29 +440,66 @@ function FightingBalls() {
     }
 
     function updateFighter(ball, dt, now) {
-      const other = nearestOther(ball)
-      if (other) {
-        const dx = other.x - ball.x
-        const dy = other.y - ball.y
-        const dist = Math.hypot(dx, dy) || 1
-        const charge = Math.max(0, 1 - dist / (arenaR * 1.2))
-        ball.vx += (dx / dist) * (0.28 + charge * 0.55) * dt
-        ball.vy += (dy / dist) * (0.28 + charge * 0.55) * dt
-        ball.anger += (charge - ball.anger) * 0.1
-      } else {
-        ball.anger *= 0.95
+      const accel = 0.85 * dt
+      let steered = false
+
+      if (ball.control === 'wasd') {
+        if (keys.w) ball.vy -= accel
+        if (keys.s) ball.vy += accel
+        if (keys.a) ball.vx -= accel
+        if (keys.d) ball.vx += accel
+        steered = true
+      } else if (ball.control === 'arrows') {
+        if (keys.up) ball.vy -= accel
+        if (keys.down) ball.vy += accel
+        if (keys.left) ball.vx -= accel
+        if (keys.right) ball.vx += accel
+        steered = true
       }
 
-      ball.vx += Math.sin(now * 0.0015 + ball.face) * 0.05 * dt
-      ball.vy += Math.cos(now * 0.0018 - ball.face) * 0.05 * dt
-      ball.vx *= 0.99
-      ball.vy *= 0.99
+      if (steered) {
+        ball.vx *= 0.92
+        ball.vy *= 0.92
 
-      const speed = Math.hypot(ball.vx, ball.vy)
-      const max = 10
-      if (speed > max) {
-        ball.vx = (ball.vx / speed) * max
-        ball.vy = (ball.vy / speed) * max
+        const other = nearestOther(ball)
+        if (other) {
+          const dist = Math.hypot(other.x - ball.x, other.y - ball.y) || 1
+          ball.anger += ((Math.max(0, 1 - dist / (arenaR * 1.2))) - ball.anger) * 0.1
+        } else {
+          ball.anger *= 0.95
+        }
+
+        const speed = Math.hypot(ball.vx, ball.vy)
+        const max = 12
+        if (speed > max) {
+          ball.vx = (ball.vx / speed) * max
+          ball.vy = (ball.vy / speed) * max
+        }
+      } else {
+        const other = nearestOther(ball)
+        if (other) {
+          const dx = other.x - ball.x
+          const dy = other.y - ball.y
+          const dist = Math.hypot(dx, dy) || 1
+          const charge = Math.max(0, 1 - dist / (arenaR * 1.2))
+          ball.vx += (dx / dist) * (0.28 + charge * 0.55) * dt
+          ball.vy += (dy / dist) * (0.28 + charge * 0.55) * dt
+          ball.anger += (charge - ball.anger) * 0.1
+        } else {
+          ball.anger *= 0.95
+        }
+
+        ball.vx += Math.sin(now * 0.0015 + ball.face) * 0.05 * dt
+        ball.vy += Math.cos(now * 0.0018 - ball.face) * 0.05 * dt
+        ball.vx *= 0.99
+        ball.vy *= 0.99
+
+        const speed = Math.hypot(ball.vx, ball.vy)
+        const max = 10
+        if (speed > max) {
+          ball.vx = (ball.vx / speed) * max
+          ball.vy = (ball.vy / speed) * max
+        }
       }
 
       ball.x += ball.vx * dt
@@ -241,13 +523,36 @@ function FightingBalls() {
       b.x += nx * overlap
       b.y += ny * overlap
 
+      // Touch damage: blue -2, red -2 (shield blocks both ways for red)
+      const canHurt = now >= a.hitUntil && now >= b.hitUntil
+      if (canHurt) {
+        const player = a.player ? a : b.player ? b : null
+        const enemy = player === a ? b : player === b ? a : null
+        if (player && enemy) {
+          const shielded = now < player.shieldUntil
+          if (!shielded) {
+            enemy.lives -= PLAYER_HIT_DAMAGE
+            player.lives -= ENEMY_HIT_DAMAGE
+          }
+        }
+        a.hitUntil = now + 500
+        b.hitUntil = now + 500
+        a.squash = 0.55
+        b.squash = 0.55
+        spawnBurst((a.x + b.x) / 2, (a.y + b.y) / 2, 1.2)
+        shake = Math.min(16, shake + 6)
+        flash = Math.min(0.45, flash + 0.2)
+        triggerCheer()
+      }
+
       const rvx = a.vx - b.vx
       const rvy = a.vy - b.vy
       const velAlong = rvx * nx + rvy * ny
-      if (velAlong > 0) return false
-
-      const canSpawn = now >= a.coolUntil && now >= b.coolUntil
-      const canHurt = now >= a.hitUntil && now >= b.hitUntil
+      if (velAlong > 0) {
+        keepInArena(a)
+        keepInArena(b)
+        return canHurt
+      }
 
       const impulse = -1.35 * velAlong
       a.vx += impulse * nx
@@ -262,24 +567,13 @@ function FightingBalls() {
       const power = Math.min(2.5, Math.abs(velAlong) / 4.5)
       const mx = (a.x + b.x) / 2
       const my = (a.y + b.y) / 2
-      spawnBurst(mx, my, power)
-      a.squash = 0.55
-      b.squash = 0.55
+      if (!canHurt) spawnBurst(mx, my, power)
+      a.squash = Math.max(a.squash, 0.55)
+      b.squash = Math.max(b.squash, 0.55)
       shake = Math.min(16, shake + power * 5)
       flash = Math.min(0.45, flash + power * 0.18)
       keepInArena(a)
       keepInArena(b)
-
-      if (canHurt && power > 0.25) {
-        a.lives -= 1
-        b.lives -= 1
-        a.hitUntil = now + 450
-        b.hitUntil = now + 450
-      }
-
-      if (canSpawn && power > 0.15) {
-        if (spawnFighter(mx, my)) triggerCheer()
-      }
 
       return true
     }
@@ -420,43 +714,90 @@ function FightingBalls() {
     }
 
     function drawBall(ball, r, happy) {
-      const squash = ball.squash || 0
+      const squash = Math.min(0.45, ball.squash || 0)
       const anger = ball.anger || 0
+      const color = ball.color || '#ff4d3a'
+      const glowColor = ball.glow || '#ff8a70'
 
       ctx.save()
       ctx.translate(ball.x, ball.y + r * 0.55)
       ctx.scale(1, 0.35)
-      ctx.fillStyle = 'rgba(0,0,0,0.3)'
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'
       ctx.beginPath()
-      ctx.arc(0, 0, Math.max(0.5, r * 0.9), 0, Math.PI * 2)
+      ctx.arc(0, 0, Math.max(0.5, r * 0.95), 0, Math.PI * 2)
       ctx.fill()
       ctx.restore()
 
       ctx.save()
       ctx.translate(ball.x, ball.y)
-      ctx.scale(1 + squash * 0.3, 1 - squash * 0.25)
+      ctx.scale(1 + squash * 0.25, Math.max(0.7, 1 - squash * 0.2))
 
-      const glow = ctx.createRadialGradient(0, 0, r * 0.2, 0, 0, r * 2)
-      glow.addColorStop(0, `${ball.glow}66`)
+      // Outer glow
+      const glow = ctx.createRadialGradient(0, 0, r * 0.15, 0, 0, r * 2.4)
+      glow.addColorStop(0, `${glowColor}aa`)
+      glow.addColorStop(0.45, `${glowColor}44`)
       glow.addColorStop(1, 'transparent')
       ctx.fillStyle = glow
       ctx.beginPath()
-      ctx.arc(0, 0, Math.max(0.5, r * 2), 0, Math.PI * 2)
+      ctx.arc(0, 0, Math.max(0.5, r * 2.4), 0, Math.PI * 2)
       ctx.fill()
 
-      const body = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.1, 0, 0, r)
+      // Solid body so they never disappear
+      ctx.fillStyle = color
+      ctx.beginPath()
+      ctx.arc(0, 0, Math.max(1, r), 0, Math.PI * 2)
+      ctx.fill()
+
+      // Highlight
+      const body = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.05, 0, 0, r)
       body.addColorStop(0, '#ffffff')
-      body.addColorStop(0.2, ball.glow)
-      body.addColorStop(1, ball.color)
+      body.addColorStop(0.25, glowColor)
+      body.addColorStop(1, color)
       ctx.fillStyle = body
       ctx.beginPath()
-      ctx.arc(0, 0, Math.max(0.5, r), 0, Math.PI * 2)
+      ctx.arc(0, 0, Math.max(1, r), 0, Math.PI * 2)
       ctx.fill()
+
+      // Bright outline for visibility
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = Math.max(3, r * 0.1)
+      ctx.beginPath()
+      ctx.arc(0, 0, Math.max(1, r), 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.strokeStyle = color
+      ctx.lineWidth = Math.max(2, r * 0.06)
+      ctx.beginPath()
+      ctx.arc(0, 0, Math.max(1, r * 0.92), 0, Math.PI * 2)
+      ctx.stroke()
+
+      // Shield bubble when immortal
+      if (ball.player && performance.now() < ball.shieldUntil) {
+        const pulse = 0.65 + Math.sin(performance.now() * 0.012) * 0.2
+        const shieldR = r * 1.35
+        const shieldGlow = ctx.createRadialGradient(0, 0, r * 0.8, 0, 0, shieldR)
+        shieldGlow.addColorStop(0, 'rgba(120, 220, 255, 0.08)')
+        shieldGlow.addColorStop(0.7, `rgba(80, 200, 255, ${0.2 * pulse})`)
+        shieldGlow.addColorStop(1, 'rgba(180, 240, 255, 0)')
+        ctx.fillStyle = shieldGlow
+        ctx.beginPath()
+        ctx.arc(0, 0, shieldR, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.strokeStyle = `rgba(160, 235, 255, ${0.75 * pulse})`
+        ctx.lineWidth = 4
+        ctx.beginPath()
+        ctx.arc(0, 0, shieldR, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.45 * pulse})`
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.arc(0, 0, shieldR * 0.88, 0, Math.PI * 2)
+        ctx.stroke()
+      }
 
       const eyeY = -r * 0.12
       const eyeSpread = r * 0.28
-      ctx.strokeStyle = 'rgba(20,12,28,0.75)'
-      ctx.lineWidth = Math.max(1.5, r * 0.08)
+      ctx.strokeStyle = 'rgba(20,12,28,0.9)'
+      ctx.lineWidth = Math.max(2, r * 0.09)
       ctx.lineCap = 'round'
 
       if (happy) {
@@ -506,22 +847,44 @@ function FightingBalls() {
 
       // Life pips above fighters
       if (typeof ball.lives === 'number') {
+        const maxLives = ball.maxLives || PLAYER_LIVES
         const lives = Math.max(0, ball.lives)
-        const pipR = Math.max(2.5, r * 0.12)
-        const gap = pipR * 2.4
-        const totalW = (START_LIVES - 1) * gap
+        const pipR = Math.max(2.2, r * 0.1)
+        const gap = pipR * 2.3
+        const totalW = (maxLives - 1) * gap
         const startX = ball.x - totalW / 2
         const pipY = ball.y - r - pipR * 3
-        for (let i = 0; i < START_LIVES; i += 1) {
+        for (let i = 0; i < maxLives; i += 1) {
           ctx.beginPath()
           ctx.arc(startX + i * gap, pipY, pipR, 0, Math.PI * 2)
           if (i < lives) {
-            ctx.fillStyle = '#ff5a5a'
+            ctx.fillStyle = ball.player ? '#ff5a5a' : '#5ab8ff'
             ctx.fill()
           } else {
             ctx.strokeStyle = 'rgba(255,255,255,0.25)'
             ctx.lineWidth = 1.5
             ctx.stroke()
+          }
+        }
+
+        // Remaining shield uses (cyan) under life pips for red
+        if (ball.player) {
+          const uses = Math.max(0, ball.shieldUses || 0)
+          const sGap = pipR * 2.6
+          const sTotal = (SHIELD_USES_PER_ROUND - 1) * sGap
+          const sStart = ball.x - sTotal / 2
+          const sY = pipY - pipR * 3
+          for (let i = 0; i < SHIELD_USES_PER_ROUND; i += 1) {
+            ctx.beginPath()
+            ctx.arc(sStart + i * sGap, sY, pipR * 0.9, 0, Math.PI * 2)
+            if (i < uses) {
+              ctx.fillStyle = '#7ad7ff'
+              ctx.fill()
+            } else {
+              ctx.strokeStyle = 'rgba(122, 215, 255, 0.3)'
+              ctx.lineWidth = 1.5
+              ctx.stroke()
+            }
           }
         }
       }
@@ -550,6 +913,8 @@ function FightingBalls() {
 
         removeDeadFighters()
 
+        updateStones(dt, now)
+        updateBombs(dt)
         updateSpectators(dt, now)
 
         shake *= 0.85
@@ -606,6 +971,14 @@ function FightingBalls() {
           drawBall(fighters[i], ballR, false)
         }
 
+        for (let i = 0; i < stones.length; i += 1) {
+          drawStone(stones[i])
+        }
+
+        for (let i = 0; i < bombs.length; i += 1) {
+          drawBomb(bombs[i])
+        }
+
         ctx.restore()
 
         if (flash > 0.02) {
@@ -619,6 +992,90 @@ function FightingBalls() {
 
     resize()
     window.addEventListener('resize', resize)
+
+    function onKeyDown(e) {
+      const k = e.key.toLowerCase()
+      if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
+        keys[k] = true
+        e.preventDefault()
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        keys.up = true
+        e.preventDefault()
+        return
+      }
+      if (e.key === 'ArrowDown') {
+        keys.down = true
+        e.preventDefault()
+        return
+      }
+      if (e.key === 'ArrowLeft') {
+        keys.left = true
+        e.preventDefault()
+        return
+      }
+      if (e.key === 'ArrowRight') {
+        keys.right = true
+        e.preventDefault()
+        return
+      }
+      if (k === 'e' && !e.repeat) {
+        e.preventDefault()
+        const player = fighters.find((f) => f.player)
+        if (
+          player &&
+          player.shieldUses > 0 &&
+          performance.now() >= player.shieldUntil
+        ) {
+          player.shieldUntil = performance.now() + SHIELD_DURATION
+          player.shieldUses -= 1
+        }
+        return
+      }
+      if (k === 'q' && !e.repeat) {
+        e.preventDefault()
+        const player = fighters.find((f) => f.player)
+        if (player) throwStone(player)
+        return
+      }
+      if ((k === '1' || e.code === 'Digit1' || e.code === 'Numpad1') && !e.repeat) {
+        e.preventDefault()
+        const blue = fighters.find((f) => f.control === 'arrows')
+        if (blue) throwBomb(blue)
+      }
+    }
+
+    function onKeyUp(e) {
+      const k = e.key.toLowerCase()
+      if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
+        keys[k] = false
+        e.preventDefault()
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        keys.up = false
+        e.preventDefault()
+        return
+      }
+      if (e.key === 'ArrowDown') {
+        keys.down = false
+        e.preventDefault()
+        return
+      }
+      if (e.key === 'ArrowLeft') {
+        keys.left = false
+        e.preventDefault()
+        return
+      }
+      if (e.key === 'ArrowRight') {
+        keys.right = false
+        e.preventDefault()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
     raf = requestAnimationFrame(frame)
 
     // Debug hook for runtime checks
@@ -637,6 +1094,8 @@ function FightingBalls() {
     return () => {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', resize)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
       delete window.__arena
     }
   }, [])
