@@ -1,0 +1,15 @@
+.site {
+  min-height: 100vh;
+  width: 100%;
+}
+
+.fight-bg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  z-index: 1;
+  pointer-events: none;
+  background: #07060a;
+}
