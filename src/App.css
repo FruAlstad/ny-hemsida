@@ -10,6 +10,7 @@
   height: 100vh;
   display: block;
   z-index: 1;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: default;
   background: #07060a;
 }

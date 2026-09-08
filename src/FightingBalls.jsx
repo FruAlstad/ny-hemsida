@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react'
 const MAX_FIGHTERS = 2
 const SPECTATOR_COUNT = 18
 const PLAYER_LIVES = 7
-const ENEMY_LIVES = 20
+const ENEMY_LIVES = 10
 const PLAYER_HIT_DAMAGE = 2
 const ENEMY_HIT_DAMAGE = 2
 const SHIELD_DURATION = 2500
@@ -12,12 +12,26 @@ const STONE_SPEED = 14
 const STONE_DAMAGE = 1
 const STONE_COOLDOWN = 400
 const STONE_RADIUS = 10
+const GOLD_STONE_COST = 5
+const GOLD_STONE_DAMAGE = 7
+const GOLD_STONE_RADIUS = 16
+const GOLD_STONE_SPEED = 16
+const GOLD_STONE_COOLDOWN = 600
+const GOLD_BOMB_COST = 5
+const GOLD_BOMB_DAMAGE = 5
+const GOLD_BOMB_COOLDOWN = 700
+const GOLD_BOMB_FUSE_MS = 800
+const FISH_COST = 10
+const FISH_DAMAGE = 1
+const FISH_INTERVAL_MS = 5000
 const BOMB_SPEED = 9
-const BOMB_DAMAGE = 3
+const BOMB_DAMAGE = 5
 const BOMB_COOLDOWN = 900
 const BOMB_RADIUS = 14
-const BOMB_FUSE = 1.4
+const BOMB_FUSE_MS = 1500
 const BOMB_BLAST = 110
+const BOMB_USES_PER_ROUND = 3
+const RESPAWN_LIVES = 10
 
 const PALETTE = [
   { color: '#ff4d3a', glow: '#ff8a70' },
@@ -55,6 +69,10 @@ function FightingBalls() {
     let flash = 0
     let cheer = 0
     let spawnCooldown = 0
+    let redCoins = 0
+    let blueCoins = 0
+    let fish = null // { nextTick }
+    let fishButton = { x: 0, y: 0, w: 88, h: 36 }
 
     const fighters = []
     const spectators = []
@@ -93,6 +111,8 @@ function FightingBalls() {
         shieldUses: isPlayer ? SHIELD_USES_PER_ROUND : 0,
         stoneReadyAt: 0,
         bombReadyAt: 0,
+        bombUses: !isPlayer && paletteIndex === 1 ? BOMB_USES_PER_ROUND : 0,
+        eliminated: false,
       }
     }
 
@@ -106,6 +126,7 @@ function FightingBalls() {
       )
       // Blue is also human-controlled
       fighters[1].control = 'arrows'
+      fighters[1].bombUses = BOMB_USES_PER_ROUND
     }
 
     function placeSpectators() {
@@ -199,9 +220,19 @@ function FightingBalls() {
       })
     }
 
-    function throwStone(thrower) {
+    function throwStone(thrower, options = {}) {
       const now = performance.now()
+      const isGold = options.gold === true
+      const damage = isGold ? GOLD_STONE_DAMAGE : STONE_DAMAGE
+      const speed = isGold ? GOLD_STONE_SPEED : STONE_SPEED
+      const radius = isGold ? GOLD_STONE_RADIUS : STONE_RADIUS
+      const cooldown = isGold ? GOLD_STONE_COOLDOWN : STONE_COOLDOWN
+
       if (now < thrower.stoneReadyAt) return
+      if (isGold) {
+        if (redCoins < GOLD_STONE_COST) return
+        redCoins -= GOLD_STONE_COST
+      }
 
       const target = fighters.find((f) => f !== thrower)
       let dx = target ? target.x - thrower.x : thrower.vx
@@ -216,16 +247,18 @@ function FightingBalls() {
       const ny = dy / dist
 
       stones.push({
-        x: thrower.x + nx * (ballR + STONE_RADIUS),
-        y: thrower.y + ny * (ballR + STONE_RADIUS),
-        vx: nx * STONE_SPEED + thrower.vx * 0.3,
-        vy: ny * STONE_SPEED + thrower.vy * 0.3,
-        r: STONE_RADIUS,
+        x: thrower.x + nx * (ballR + radius),
+        y: thrower.y + ny * (ballR + radius),
+        vx: nx * speed + thrower.vx * 0.3,
+        vy: ny * speed + thrower.vy * 0.3,
+        r: radius,
         life: 2.5,
         owner: thrower,
         spin: 0,
+        damage,
+        gold: isGold,
       })
-      thrower.stoneReadyAt = now + STONE_COOLDOWN
+      thrower.stoneReadyAt = now + cooldown
       thrower.squash = 0.25
     }
 
@@ -249,15 +282,15 @@ function FightingBalls() {
         let hit = false
         for (let j = 0; j < fighters.length; j += 1) {
           const f = fighters[j]
-          if (f === stone.owner) continue
+          if (f === stone.owner || f.eliminated) continue
           const d = Math.hypot(f.x - stone.x, f.y - stone.y)
           if (d < ballR + stone.r) {
-            f.lives -= STONE_DAMAGE
+            f.lives -= stone.damage || STONE_DAMAGE
             f.squash = 0.5
             f.vx += stone.vx * 0.25
             f.vy += stone.vy * 0.25
-            spawnBurst(stone.x, stone.y, 1)
-            shake = Math.min(14, shake + 4)
+            spawnBurst(stone.x, stone.y, stone.gold ? 2 : 1)
+            shake = Math.min(14, shake + (stone.gold ? 8 : 4))
             hit = true
             break
           }
@@ -270,25 +303,59 @@ function FightingBalls() {
       ctx.save()
       ctx.translate(stone.x, stone.y)
       ctx.rotate(stone.spin)
-      ctx.fillStyle = '#6b5b4a'
-      ctx.beginPath()
-      ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = '#8a7a66'
-      ctx.beginPath()
-      ctx.ellipse(-stone.r * 0.25, -stone.r * 0.25, stone.r * 0.45, stone.r * 0.35, 0, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.strokeStyle = '#3d342c'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
-      ctx.stroke()
+
+      if (stone.gold) {
+        const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, stone.r * 2)
+        glow.addColorStop(0, 'rgba(255, 220, 100, 0.55)')
+        glow.addColorStop(1, 'transparent')
+        ctx.fillStyle = glow
+        ctx.beginPath()
+        ctx.arc(0, 0, stone.r * 2, 0, Math.PI * 2)
+        ctx.fill()
+
+        const body = ctx.createRadialGradient(-4, -4, 2, 0, 0, stone.r)
+        body.addColorStop(0, '#fff3b0')
+        body.addColorStop(0.45, '#f0c040')
+        body.addColorStop(1, '#b8860b')
+        ctx.fillStyle = body
+        ctx.beginPath()
+        ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.strokeStyle = '#ffe9a0'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
+        ctx.stroke()
+      } else {
+        ctx.fillStyle = '#6b5b4a'
+        ctx.beginPath()
+        ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#8a7a66'
+        ctx.beginPath()
+        ctx.ellipse(-stone.r * 0.25, -stone.r * 0.25, stone.r * 0.45, stone.r * 0.35, 0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.strokeStyle = '#3d342c'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
+        ctx.stroke()
+      }
+
       ctx.restore()
     }
 
-    function throwBomb(thrower) {
+    function throwBomb(thrower, options = {}) {
       const now = performance.now()
+      const isGold = options.gold === true
+
       if (now < thrower.bombReadyAt) return
+      if (isGold) {
+        if (blueCoins < GOLD_BOMB_COST) return
+        blueCoins -= GOLD_BOMB_COST
+      } else if ((thrower.bombUses || 0) <= 0) {
+        return
+      }
 
       const target = fighters.find((f) => f !== thrower)
       let dx = target ? target.x - thrower.x : thrower.vx
@@ -307,47 +374,88 @@ function FightingBalls() {
         y: thrower.y + ny * (ballR + BOMB_RADIUS),
         vx: nx * BOMB_SPEED + thrower.vx * 0.2,
         vy: ny * BOMB_SPEED + thrower.vy * 0.2,
-        r: BOMB_RADIUS,
-        fuse: BOMB_FUSE,
+        r: isGold ? BOMB_RADIUS * 1.15 : BOMB_RADIUS,
+        fuseUntil: now + (isGold ? GOLD_BOMB_FUSE_MS : BOMB_FUSE_MS),
         owner: thrower,
         blink: 0,
+        gold: isGold,
+        damage: isGold ? GOLD_BOMB_DAMAGE : BOMB_DAMAGE,
+        guaranteed: isGold,
+        target,
       })
-      thrower.bombReadyAt = now + BOMB_COOLDOWN
+      thrower.bombReadyAt = now + (isGold ? GOLD_BOMB_COOLDOWN : BOMB_COOLDOWN)
+      if (!isGold) thrower.bombUses -= 1
       thrower.squash = 0.3
     }
 
     function explodeBomb(bomb) {
-      spawnBurst(bomb.x, bomb.y, 2.4)
-      shocks.push({ x: bomb.x, y: bomb.y, r: 12, max: BOMB_BLAST, life: 1 })
-      shake = Math.min(20, shake + 12)
-      flash = Math.min(0.6, flash + 0.3)
+      spawnBurst(bomb.x, bomb.y, bomb.gold ? 3 : 2.4)
+      shocks.push({
+        x: bomb.x,
+        y: bomb.y,
+        r: 12,
+        max: bomb.guaranteed ? BOMB_BLAST * 1.4 : BOMB_BLAST,
+        life: 1,
+      })
+      shake = Math.min(20, shake + (bomb.gold ? 16 : 12))
+      flash = Math.min(0.6, flash + (bomb.gold ? 0.4 : 0.3))
       triggerCheer()
 
       const now = performance.now()
+      const damage = bomb.damage || BOMB_DAMAGE
+
       for (let j = 0; j < fighters.length; j += 1) {
         const f = fighters[j]
-        if (f === bomb.owner) continue
-        const d = Math.hypot(f.x - bomb.x, f.y - bomb.y)
-        if (d > BOMB_BLAST) continue
-        if (f.player && now < f.shieldUntil) continue
-        f.lives -= BOMB_DAMAGE
-        f.squash = 0.65
-        const push = (1 - d / BOMB_BLAST) * 8
-        const px = (f.x - bomb.x) / (d || 1)
-        const py = (f.y - bomb.y) / (d || 1)
-        f.vx += px * push
-        f.vy += py * push
+        if (f === bomb.owner || f.eliminated) continue
+
+        if (!bomb.guaranteed) {
+          const d = Math.hypot(f.x - bomb.x, f.y - bomb.y)
+          if (d > BOMB_BLAST) continue
+          if (f.player && now < f.shieldUntil) continue
+          f.lives -= damage
+          f.squash = 0.65
+          const push = (1 - d / BOMB_BLAST) * 8
+          const px = (f.x - bomb.x) / (d || 1)
+          const py = (f.y - bomb.y) / (d || 1)
+          f.vx += px * push
+          f.vy += py * push
+        } else {
+          // 100% hit — always damages the opponent
+          if (f.player && now < f.shieldUntil) continue
+          f.lives -= damage
+          f.squash = 0.7
+          const d = Math.hypot(f.x - bomb.x, f.y - bomb.y) || 1
+          f.vx += ((f.x - bomb.x) / d) * 10
+          f.vy += ((f.y - bomb.y) / d) * 10
+        }
       }
     }
 
     function updateBombs(dt) {
+      const now = performance.now()
       for (let i = bombs.length - 1; i >= 0; i -= 1) {
         const bomb = bombs[i]
-        bomb.vx *= 0.98
-        bomb.vy *= 0.98
+
+        // Gold bomb homes onto target for a guaranteed hit feel
+        if (bomb.guaranteed && bomb.target && !bomb.target.eliminated) {
+          const dx = bomb.target.x - bomb.x
+          const dy = bomb.target.y - bomb.y
+          const dist = Math.hypot(dx, dy) || 1
+          bomb.vx += (dx / dist) * 1.2 * dt
+          bomb.vy += (dy / dist) * 1.2 * dt
+          const speed = Math.hypot(bomb.vx, bomb.vy)
+          const max = 12
+          if (speed > max) {
+            bomb.vx = (bomb.vx / speed) * max
+            bomb.vy = (bomb.vy / speed) * max
+          }
+        } else {
+          bomb.vx *= 0.98
+          bomb.vy *= 0.98
+        }
+
         bomb.x += bomb.vx * dt
         bomb.y += bomb.vy * dt
-        bomb.fuse -= dt * 0.02
         bomb.blink += dt * 0.25
 
         const dx = bomb.x - cx
@@ -362,7 +470,17 @@ function FightingBalls() {
           bomb.vy *= -0.4
         }
 
-        if (bomb.fuse <= 0) {
+        // Gold bomb detonates on contact too
+        if (bomb.guaranteed && bomb.target && !bomb.target.eliminated) {
+          const hitDist = Math.hypot(bomb.target.x - bomb.x, bomb.target.y - bomb.y)
+          if (hitDist < ballR + bomb.r) {
+            explodeBomb(bomb)
+            bombs.splice(i, 1)
+            continue
+          }
+        }
+
+        if (now >= bomb.fuseUntil) {
           explodeBomb(bomb)
           bombs.splice(i, 1)
         }
@@ -370,21 +488,33 @@ function FightingBalls() {
     }
 
     function drawBomb(bomb) {
-      const urgent = bomb.fuse < 0.45
+      const remaining = Math.max(0, bomb.fuseUntil - performance.now())
+      const urgent = remaining < 450
       const pulse = 0.6 + Math.sin(bomb.blink * (urgent ? 8 : 3)) * 0.4
       ctx.save()
       ctx.translate(bomb.x, bomb.y)
 
-      ctx.fillStyle = `rgba(255, 80, 40, ${0.15 * pulse})`
-      ctx.beginPath()
-      ctx.arc(0, 0, bomb.r * 1.8, 0, Math.PI * 2)
-      ctx.fill()
+      if (bomb.gold) {
+        ctx.fillStyle = `rgba(255, 200, 60, ${0.22 * pulse})`
+        ctx.beginPath()
+        ctx.arc(0, 0, bomb.r * 2.1, 0, Math.PI * 2)
+        ctx.fill()
+      } else {
+        ctx.fillStyle = `rgba(255, 80, 40, ${0.15 * pulse})`
+        ctx.beginPath()
+        ctx.arc(0, 0, bomb.r * 1.8, 0, Math.PI * 2)
+        ctx.fill()
+      }
 
-      ctx.fillStyle = '#1a1a1a'
+      ctx.fillStyle = bomb.gold ? '#3a2a08' : '#1a1a1a'
       ctx.beginPath()
       ctx.arc(0, 0, bomb.r, 0, Math.PI * 2)
       ctx.fill()
-      ctx.fillStyle = urgent ? `rgba(255,60,40,${pulse})` : '#2ec8ff'
+      ctx.fillStyle = bomb.gold
+        ? `rgba(255, 210, 70, ${pulse})`
+        : urgent
+          ? `rgba(255,60,40,${pulse})`
+          : '#2ec8ff'
       ctx.beginPath()
       ctx.arc(0, -bomb.r * 0.15, bomb.r * 0.35, 0, Math.PI * 2)
       ctx.fill()
@@ -440,6 +570,12 @@ function FightingBalls() {
     }
 
     function updateFighter(ball, dt, now) {
+      if (ball.eliminated) {
+        ball.vx = 0
+        ball.vy = 0
+        return
+      }
+
       const accel = 0.85 * dt
       let steered = false
 
@@ -509,6 +645,8 @@ function FightingBalls() {
     }
 
     function collidePair(a, b, now) {
+      if (a.eliminated || b.eliminated) return false
+
       const dx = b.x - a.x
       const dy = b.y - a.y
       const dist = Math.hypot(dx, dy) || 1
@@ -579,17 +717,201 @@ function FightingBalls() {
     }
 
     function removeDeadFighters() {
-      for (let i = fighters.length - 1; i >= 0; i -= 1) {
+      const now = performance.now()
+
+      for (let i = 0; i < fighters.length; i += 1) {
         const ball = fighters[i]
         if (ball.lives > 0) continue
+
         spawnBurst(ball.x, ball.y, 2)
-        fighters.splice(i, 1)
         shake = Math.min(18, shake + 8)
         flash = Math.min(0.55, flash + 0.2)
         triggerCheer()
+
+        // Red kills blue → red gold coin; blue kills red → blue gold coin
+        if (!ball.player && ball.control === 'arrows') {
+          redCoins += 1
+          // Fish leaves when blue dies
+          fish = null
+        } else if (ball.player) {
+          blueCoins += 1
+        }
+
+        // Come back with 10 lives
+        ball.maxLives = RESPAWN_LIVES
+        ball.lives = RESPAWN_LIVES
+        ball.vx = 0
+        ball.vy = 0
+        ball.squash = 0
+        ball.eliminated = false
+        ball.hitUntil = now + 1000
+        if (ball.player) {
+          ball.control = 'wasd'
+          ball.x = cx - arenaR * 0.25
+        } else {
+          ball.control = 'arrows'
+          ball.x = cx + arenaR * 0.25
+        }
+        ball.y = cy
+        keepInArena(ball)
       }
-      if (fighters.length === 0) {
-        resetFighters()
+    }
+
+    function drawCoin(x, y, size) {
+      ctx.save()
+      ctx.translate(x, y)
+      const grad = ctx.createRadialGradient(-4, -4, 2, 0, 0, size)
+      grad.addColorStop(0, '#ffe9a0')
+      grad.addColorStop(0.5, '#f0c040')
+      grad.addColorStop(1, '#c49220')
+      ctx.fillStyle = grad
+      ctx.beginPath()
+      ctx.arc(0, 0, size * 0.55, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = '#a87818'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(0, 0, size * 0.55, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.strokeStyle = 'rgba(255, 240, 180, 0.7)'
+      ctx.lineWidth = 1.5
+      ctx.beginPath()
+      ctx.arc(0, 0, size * 0.32, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
+    }
+
+    function drawFishOnBall(ball) {
+      const t = performance.now() * 0.008
+      const ox = Math.sin(t) * 6
+      const oy = Math.cos(t * 1.3) * 4
+      ctx.save()
+      ctx.translate(ball.x + ballR * 0.55 + ox, ball.y - ballR * 0.35 + oy)
+      ctx.rotate(Math.sin(t) * 0.25)
+
+      // Body
+      ctx.fillStyle = '#5ec8ff'
+      ctx.beginPath()
+      ctx.ellipse(0, 0, 14, 8, 0, 0, Math.PI * 2)
+      ctx.fill()
+      // Tail
+      ctx.beginPath()
+      ctx.moveTo(-12, 0)
+      ctx.lineTo(-22, -8)
+      ctx.lineTo(-22, 8)
+      ctx.closePath()
+      ctx.fill()
+      // Eye
+      ctx.fillStyle = '#102030'
+      ctx.beginPath()
+      ctx.arc(6, -2, 2.2, 0, Math.PI * 2)
+      ctx.fill()
+      // Fin
+      ctx.fillStyle = '#3aa8e0'
+      ctx.beginPath()
+      ctx.moveTo(0, -7)
+      ctx.lineTo(4, -14)
+      ctx.lineTo(8, -6)
+      ctx.closePath()
+      ctx.fill()
+
+      ctx.restore()
+    }
+
+    function drawFishButton() {
+      if (redCoins < FISH_COST || fish) {
+        fishButton.w = 0
+        fishButton.h = 0
+        return
+      }
+
+      const rows = Math.ceil(Math.max(1, redCoins) / 8)
+      const x = 20
+      const y = 28 + rows * 26 + 12
+      const w = 100
+      const h = 38
+      fishButton = { x, y, w, h }
+
+      ctx.save()
+      // Button
+      const grad = ctx.createLinearGradient(x, y, x, y + h)
+      grad.addColorStop(0, '#3ecfff')
+      grad.addColorStop(1, '#1a7fbf')
+      ctx.fillStyle = grad
+      ctx.strokeStyle = '#a8ecff'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(x, y, w, h, 8)
+      } else {
+        ctx.rect(x, y, w, h)
+      }
+      ctx.fill()
+      ctx.stroke()
+
+      // Mini fish icon
+      ctx.fillStyle = '#e8faff'
+      ctx.beginPath()
+      ctx.ellipse(x + 22, y + h / 2, 10, 6, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.moveTo(x + 14, y + h / 2)
+      ctx.lineTo(x + 6, y + h / 2 - 6)
+      ctx.lineTo(x + 6, y + h / 2 + 6)
+      ctx.closePath()
+      ctx.fill()
+
+      ctx.fillStyle = '#ffffff'
+      ctx.font = 'bold 13px Figtree, sans-serif'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('FISK', x + 40, y + h / 2)
+      ctx.restore()
+    }
+
+    function drawGoldCoins() {
+      const size = 18
+      const gap = 26
+      const cols = 8
+
+      // Red coins — top left
+      for (let i = 0; i < redCoins; i += 1) {
+        const col = i % cols
+        const row = Math.floor(i / cols)
+        drawCoin(28 + col * gap, 28 + row * gap, size)
+      }
+
+      // Blue coins — top right
+      for (let i = 0; i < blueCoins; i += 1) {
+        const col = i % cols
+        const row = Math.floor(i / cols)
+        drawCoin(width - 28 - col * gap, 28 + row * gap, size)
+      }
+
+      drawFishButton()
+    }
+
+    function activateFish() {
+      if (redCoins < FISH_COST || fish) return
+      const blue = fighters.find((f) => f.control === 'arrows' && !f.eliminated)
+      if (!blue) return
+      redCoins -= FISH_COST
+      fish = { nextTick: performance.now() + FISH_INTERVAL_MS }
+    }
+
+    function updateFish(now) {
+      if (!fish) return
+      const blue = fighters.find((f) => f.control === 'arrows')
+      if (!blue || blue.eliminated || blue.lives <= 0) {
+        fish = null
+        return
+      }
+      if (now >= fish.nextTick) {
+        if (!(blue.player && now < blue.shieldUntil)) {
+          blue.lives -= FISH_DAMAGE
+          blue.squash = 0.35
+          spawnBurst(blue.x, blue.y, 0.8)
+        }
+        fish.nextTick = now + FISH_INTERVAL_MS
       }
     }
 
@@ -887,6 +1209,27 @@ function FightingBalls() {
             }
           }
         }
+
+        // Remaining bomb uses for blue
+        if (ball.control === 'arrows') {
+          const uses = Math.max(0, ball.bombUses || 0)
+          const sGap = pipR * 2.6
+          const sTotal = (BOMB_USES_PER_ROUND - 1) * sGap
+          const sStart = ball.x - sTotal / 2
+          const sY = pipY - pipR * 3
+          for (let i = 0; i < BOMB_USES_PER_ROUND; i += 1) {
+            ctx.beginPath()
+            ctx.arc(sStart + i * sGap, sY, pipR * 0.9, 0, Math.PI * 2)
+            if (i < uses) {
+              ctx.fillStyle = '#ffb454'
+              ctx.fill()
+            } else {
+              ctx.strokeStyle = 'rgba(255, 180, 84, 0.3)'
+              ctx.lineWidth = 1.5
+              ctx.stroke()
+            }
+          }
+        }
       }
     }
 
@@ -915,6 +1258,7 @@ function FightingBalls() {
 
         updateStones(dt, now)
         updateBombs(dt)
+        updateFish(now)
         updateSpectators(dt, now)
 
         shake *= 0.85
@@ -971,6 +1315,12 @@ function FightingBalls() {
           drawBall(fighters[i], ballR, false)
         }
 
+        // Parasite fish on blue
+        if (fish) {
+          const blue = fighters.find((f) => f.control === 'arrows')
+          if (blue && !blue.eliminated) drawFishOnBall(blue)
+        }
+
         for (let i = 0; i < stones.length; i += 1) {
           drawStone(stones[i])
         }
@@ -980,6 +1330,9 @@ function FightingBalls() {
         }
 
         ctx.restore()
+
+        // HUD: gold coins stay fixed in the left corner
+        drawGoldCoins()
 
         if (flash > 0.02) {
           ctx.fillStyle = `rgba(255,250,230,${flash * 0.35})`
@@ -1039,10 +1392,22 @@ function FightingBalls() {
         if (player) throwStone(player)
         return
       }
+      if (k === 'z' && !e.repeat) {
+        e.preventDefault()
+        const player = fighters.find((f) => f.player)
+        if (player) throwStone(player, { gold: true })
+        return
+      }
       if ((k === '1' || e.code === 'Digit1' || e.code === 'Numpad1') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
         if (blue) throwBomb(blue)
+        return
+      }
+      if ((k === '0' || e.code === 'Digit0' || e.code === 'Numpad0') && !e.repeat) {
+        e.preventDefault()
+        const blue = fighters.find((f) => f.control === 'arrows')
+        if (blue) throwBomb(blue, { gold: true })
       }
     }
 
@@ -1076,6 +1441,43 @@ function FightingBalls() {
 
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
+
+    function onPointerDown(e) {
+      const rect = canvas.getBoundingClientRect()
+      const scaleX = width / rect.width
+      const scaleY = height / rect.height
+      const px = (e.clientX - rect.left) * scaleX
+      const py = (e.clientY - rect.top) * scaleY
+      if (
+        fishButton.w > 0 &&
+        px >= fishButton.x &&
+        px <= fishButton.x + fishButton.w &&
+        py >= fishButton.y &&
+        py <= fishButton.y + fishButton.h
+      ) {
+        activateFish()
+      }
+    }
+
+    canvas.style.cursor = 'default'
+    canvas.addEventListener('pointerdown', onPointerDown)
+
+    function onPointerMove(e) {
+      const rect = canvas.getBoundingClientRect()
+      const scaleX = width / rect.width
+      const scaleY = height / rect.height
+      const px = (e.clientX - rect.left) * scaleX
+      const py = (e.clientY - rect.top) * scaleY
+      const over =
+        fishButton.w > 0 &&
+        px >= fishButton.x &&
+        px <= fishButton.x + fishButton.w &&
+        py >= fishButton.y &&
+        py <= fishButton.y + fishButton.h
+      canvas.style.cursor = over ? 'pointer' : 'default'
+    }
+    canvas.addEventListener('pointermove', onPointerMove)
+
     raf = requestAnimationFrame(frame)
 
     // Debug hook for runtime checks
@@ -1096,6 +1498,8 @@ function FightingBalls() {
       window.removeEventListener('resize', resize)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      canvas.removeEventListener('pointerdown', onPointerDown)
+      canvas.removeEventListener('pointermove', onPointerMove)
       delete window.__arena
     }
   }, [])
