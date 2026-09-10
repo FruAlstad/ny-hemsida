@@ -12,20 +12,28 @@ const STONE_SPEED = 14
 const STONE_DAMAGE = 1
 const STONE_COOLDOWN = 400
 const STONE_RADIUS = 10
-const GOLD_STONE_COST = 5
+const STONE_USES = 30
+const GOLD_STONE_COST = 3
 const GOLD_STONE_DAMAGE = 7
 const GOLD_STONE_RADIUS = 16
 const GOLD_STONE_SPEED = 16
 const GOLD_STONE_COOLDOWN = 600
-const SWORD_COST = 7
+const LIFE_DRINK_COST = 3
+const LIFE_DRINK_HEAL = 5
 const SWORD_DAMAGE = 8
 const SWORD_SPEED = 17
 const SWORD_COOLDOWN = 650
 const SWORD_LENGTH = 28
-const GOLD_BOMB_COST = 5
+const GOLD_BOMB_COST = 4
 const GOLD_BOMB_DAMAGE = 5
 const GOLD_BOMB_COOLDOWN = 700
 const GOLD_BOMB_FUSE_MS = 800
+const BODYGUARD_COST = 10
+const BODYGUARD_DURATION_MS = 6700
+const BODYGUARD_DAMAGE = 1
+const BODYGUARD_TICK_MS = 1000
+const BODYGUARD_SPEED = 11
+const BODYGUARD_RADIUS = 18
 
 function rollKillCoins() {
   const r = Math.random()
@@ -47,6 +55,16 @@ const BOMB_USES_PER_ROUND = 3
 const RESPAWN_LIVES = 10
 const RESPAWN_COUNTDOWN_MS = 3000
 const WIN_SCORE = 10
+const BOSS_HP = 50
+const BOSS_DAMAGE = 3
+const BOSS_TOUCH_DAMAGE = 2
+const BOSS_RESPAWNS = 5
+const BOSS_BOMBS = 5
+const BOSS_SCALE = 1.5
+const BOSS_MAX_SPEED = 4.2
+const BOSS_ACCEL = 0.32
+const BOSS_KILL_REWARD = 15
+const BOSS_SKIP_REWARD = 10
 
 const PALETTE = [
   { color: '#ff4d3a', glow: '#ff8a70' },
@@ -80,6 +98,7 @@ function FightingBalls() {
     const shocks = []
     const stones = []
     const bombs = []
+    const bodyguards = []
     let shake = 0
     let flash = 0
     let cheer = 0
@@ -90,12 +109,21 @@ function FightingBalls() {
     let blueScore = 0
     let winner = null // 'red' | 'blue'
     let winnerUntil = 0
+    let bossReady = false
+    let bossMode = false
+    let bossRespawnsLeft = BOSS_RESPAWNS
+    let bossDamageRed = 0
+    let bossDamageBlue = 0
+    let bossButton = { x: 0, y: 0, w: 0, h: 0 }
+    let skipBossButton = { x: 0, y: 0, w: 0, h: 0 }
     let shopOpen = false
+    let shopPausedAt = 0
     let shopButton = { x: 0, y: 0, w: 120, h: 42 }
     const shopHits = [] // clickable item rects {x,y,w,h,id}
     const inventory = {
       goldStone: 0,
-      sword: 0,
+      lifeDrinkRed: 0,
+      lifeDrinkBlue: 0,
       goldBomb: 0,
     }
 
@@ -135,6 +163,7 @@ function FightingBalls() {
         shieldUntil: 0,
         shieldUses: isPlayer ? SHIELD_USES_PER_ROUND : 0,
         stoneReadyAt: 0,
+        stoneUses: isPlayer ? STONE_USES : 0,
         bombReadyAt: 0,
         bombUses: !isPlayer && paletteIndex === 1 ? BOMB_USES_PER_ROUND : 0,
         eliminated: false,
@@ -146,6 +175,7 @@ function FightingBalls() {
       fighters.length = 0
       stones.length = 0
       bombs.length = 0
+      bodyguards.length = 0
       fighters.push(
         makeFighter(cx - arenaR * 0.25, cy, 0, 0, 0, true),
         makeFighter(cx + arenaR * 0.25, cy, 0, 0, 1, false),
@@ -247,6 +277,7 @@ function FightingBalls() {
     }
 
     function throwStone(thrower, options = {}) {
+      if (!thrower || thrower.eliminated || thrower.lives <= 0) return
       const now = performance.now()
       const isGold = options.gold === true
       const isSword = options.sword === true
@@ -265,14 +296,19 @@ function FightingBalls() {
 
       if (now < thrower.stoneReadyAt) return
       if (isSword) {
-        if (inventory.sword <= 0) return
-        inventory.sword -= 1
+        return // svärd borttaget från spelet
       } else if (isGold) {
         if (inventory.goldStone <= 0) return
         inventory.goldStone -= 1
+      } else {
+        // Vanlig sten — röd har begränsat antal
+        if ((thrower.stoneUses || 0) <= 0) return
+        thrower.stoneUses -= 1
       }
 
-      const target = fighters.find((f) => f !== thrower)
+      const target = bossMode
+        ? fighters.find((f) => f.isBoss && !f.eliminated)
+        : fighters.find((f) => f !== thrower && !f.eliminated)
       let dx = target ? target.x - thrower.x : thrower.vx
       let dy = target ? target.y - thrower.y : thrower.vy
       let dist = Math.hypot(dx, dy)
@@ -329,8 +365,12 @@ function FightingBalls() {
           const f = fighters[j]
           if (f === stone.owner || f.eliminated) continue
           const d = Math.hypot(f.x - stone.x, f.y - stone.y)
-          if (d < ballR + stone.r) {
-            f.lives -= stone.damage || STONE_DAMAGE
+          if (d < getRadius(f) + stone.r) {
+            // I boss-läge: stenar träffar bara bossen (inte lagkamraten)
+            if (bossMode && !f.isBoss) continue
+            const dmg = stone.damage || STONE_DAMAGE
+            f.lives -= dmg
+            if (f.isBoss) addBossDamage(stone.owner, dmg)
             f.squash = 0.5
             f.vx += stone.vx * 0.25
             f.vy += stone.vy * 0.25
@@ -425,6 +465,7 @@ function FightingBalls() {
     }
 
     function throwBomb(thrower, options = {}) {
+      if (!thrower || thrower.eliminated || thrower.lives <= 0) return
       const now = performance.now()
       const isGold = options.gold === true
 
@@ -436,7 +477,9 @@ function FightingBalls() {
         return
       }
 
-      const target = fighters.find((f) => f !== thrower)
+      const target = bossMode
+        ? fighters.find((f) => f.isBoss && !f.eliminated)
+        : fighters.find((f) => f !== thrower && !f.eliminated)
       let dx = target ? target.x - thrower.x : thrower.vx
       let dy = target ? target.y - thrower.y : thrower.vy
       let dist = Math.hypot(dx, dy)
@@ -486,12 +529,14 @@ function FightingBalls() {
       for (let j = 0; j < fighters.length; j += 1) {
         const f = fighters[j]
         if (f === bomb.owner || f.eliminated) continue
+        if (bossMode && !f.isBoss) continue
 
         if (!bomb.guaranteed) {
           const d = Math.hypot(f.x - bomb.x, f.y - bomb.y)
           if (d > BOMB_BLAST) continue
           if (f.player && now < f.shieldUntil) continue
           f.lives -= damage
+          if (f.isBoss) addBossDamage(bomb.owner, damage)
           f.squash = 0.65
           const push = (1 - d / BOMB_BLAST) * 8
           const px = (f.x - bomb.x) / (d || 1)
@@ -502,6 +547,7 @@ function FightingBalls() {
           // 100% hit — always damages the opponent
           if (f.player && now < f.shieldUntil) continue
           f.lives -= damage
+          if (f.isBoss) addBossDamage(bomb.owner, damage)
           f.squash = 0.7
           const d = Math.hypot(f.x - bomb.x, f.y - bomb.y) || 1
           f.vx += ((f.x - bomb.x) / d) * 10
@@ -613,8 +659,14 @@ function FightingBalls() {
       ctx.restore()
     }
 
+    function getRadius(ball) {
+      if (ball && ball.isBoss) return ballR * BOSS_SCALE
+      return ballR
+    }
+
     function keepInArena(ball) {
-      const limit = Math.max(16, arenaR - ballR - 6)
+      const r = getRadius(ball)
+      const limit = Math.max(16, arenaR - r - 6)
       const dx = ball.x - cx
       const dy = ball.y - cy
       const dist = Math.hypot(dx, dy) || 1
@@ -638,7 +690,9 @@ function FightingBalls() {
       let bestDist = Infinity
       for (let i = 0; i < fighters.length; i += 1) {
         const other = fighters[i]
-        if (other === ball) continue
+        if (other === ball || other.eliminated) continue
+        // Boss jagar spelare, spelare undviker bossen
+        if (ball.isBoss && other.isBoss) continue
         const d = Math.hypot(other.x - ball.x, other.y - ball.y)
         if (d < bestDist) {
           bestDist = d
@@ -692,28 +746,32 @@ function FightingBalls() {
         }
       } else {
         const other = nearestOther(ball)
+        const bossAi = !!ball.isBoss
+        const accelScale = bossAi ? BOSS_ACCEL : 1
+        const maxSpeed = bossAi ? BOSS_MAX_SPEED : 10
         if (other) {
           const dx = other.x - ball.x
           const dy = other.y - ball.y
           const dist = Math.hypot(dx, dy) || 1
           const charge = Math.max(0, 1 - dist / (arenaR * 1.2))
-          ball.vx += (dx / dist) * (0.28 + charge * 0.55) * dt
-          ball.vy += (dy / dist) * (0.28 + charge * 0.55) * dt
+          ball.vx += (dx / dist) * (0.28 + charge * 0.55) * accelScale * dt
+          ball.vy += (dy / dist) * (0.28 + charge * 0.55) * accelScale * dt
           ball.anger += (charge - ball.anger) * 0.1
         } else {
           ball.anger *= 0.95
         }
 
-        ball.vx += Math.sin(now * 0.0015 + ball.face) * 0.05 * dt
-        ball.vy += Math.cos(now * 0.0018 - ball.face) * 0.05 * dt
-        ball.vx *= 0.99
-        ball.vy *= 0.99
+        if (!bossAi) {
+          ball.vx += Math.sin(now * 0.0015 + ball.face) * 0.05 * dt
+          ball.vy += Math.cos(now * 0.0018 - ball.face) * 0.05 * dt
+        }
+        ball.vx *= bossAi ? 0.96 : 0.99
+        ball.vy *= bossAi ? 0.96 : 0.99
 
         const speed = Math.hypot(ball.vx, ball.vy)
-        const max = 10
-        if (speed > max) {
-          ball.vx = (ball.vx / speed) * max
-          ball.vy = (ball.vy / speed) * max
+        if (speed > maxSpeed) {
+          ball.vx = (ball.vx / speed) * maxSpeed
+          ball.vy = (ball.vy / speed) * maxSpeed
         }
       }
 
@@ -726,10 +784,12 @@ function FightingBalls() {
     function collidePair(a, b, now) {
       if (a.eliminated || b.eliminated) return false
 
+      const ra = getRadius(a)
+      const rb = getRadius(b)
       const dx = b.x - a.x
       const dy = b.y - a.y
       const dist = Math.hypot(dx, dy) || 1
-      const min = ballR * 2
+      const min = ra + rb
       if (dist >= min) return false
 
       const nx = dx / dist
@@ -740,16 +800,31 @@ function FightingBalls() {
       b.x += nx * overlap
       b.y += ny * overlap
 
-      // Touch damage: blue -2, red -2 (shield blocks both ways for red)
       const canHurt = now >= a.hitUntil && now >= b.hitUntil
       if (canHurt) {
-        const player = a.player ? a : b.player ? b : null
-        const enemy = player === a ? b : player === b ? a : null
-        if (player && enemy) {
-          const shielded = now < player.shieldUntil
+        if (a.isBoss || b.isBoss) {
+          const boss = a.isBoss ? a : b
+          const hero = a.isBoss ? b : a
+          const shielded =
+            hero.control === 'wasd' && now < hero.shieldUntil
           if (!shielded) {
-            enemy.lives -= PLAYER_HIT_DAMAGE
-            player.lives -= ENEMY_HIT_DAMAGE
+            hero.lives -= BOSS_DAMAGE
+          }
+          boss.lives -= BOSS_TOUCH_DAMAGE
+          addBossDamage(hero, BOSS_TOUCH_DAMAGE)
+          boss.anger = 1
+        } else if (bossMode) {
+          // Lagkamrater skadar inte varandra under bossfight
+        } else {
+          // Touch damage: blue -2, red -2 (shield blocks both ways for red)
+          const player = a.player ? a : b.player ? b : null
+          const enemy = player === a ? b : player === b ? a : null
+          if (player && enemy) {
+            const shielded = now < player.shieldUntil
+            if (!shielded) {
+              enemy.lives -= PLAYER_HIT_DAMAGE
+              player.lives -= ENEMY_HIT_DAMAGE
+            }
           }
         }
         a.hitUntil = now + 500
@@ -795,6 +870,26 @@ function FightingBalls() {
       return true
     }
 
+    function addBossDamage(attacker, amount) {
+      if (!bossMode || !attacker || amount <= 0) return
+      if (attacker.isBoss) return
+      if (attacker.player || attacker.control === 'wasd' || attacker._bossSide === 'red') {
+        bossDamageRed += amount
+      } else if (attacker.control === 'arrows' || attacker._bossSide === 'blue') {
+        bossDamageBlue += amount
+      }
+    }
+
+    function allHeroesDefeated() {
+      return fighters.every(
+        (f) =>
+          f.isBoss ||
+          (f.eliminated &&
+            (f.bossRespawnsLeft || 0) <= 0 &&
+            !(f.respawnAt > 0)),
+      )
+    }
+
     function reviveFighter(ball, now) {
       ball.maxLives = RESPAWN_LIVES
       ball.lives = RESPAWN_LIVES
@@ -808,20 +903,149 @@ function FightingBalls() {
       ball.shieldUntil = 0
       ball.stoneReadyAt = 0
       ball.bombReadyAt = 0
+
+      if (bossMode) {
+        if (ball.player || ball._bossSide === 'red') {
+          ball.control = 'wasd'
+          ball.player = true
+          ball._bossSide = 'red'
+          ball.shieldUses = SHIELD_USES_PER_ROUND
+          ball.stoneUses = STONE_USES
+          ball.bombUses = 0
+          ball.x = cx - arenaR * 0.3
+        } else {
+          ball.control = 'arrows'
+          ball.player = false
+          ball._bossSide = 'blue'
+          ball.shieldUses = 0
+          ball.stoneUses = 0
+          ball.x = cx + arenaR * 0.3
+        }
+        ball.y = cy
+        keepInArena(ball)
+        spawnBurst(ball.x, ball.y, 1.2)
+        return
+      }
+
       if (ball.player) {
         ball.control = 'wasd'
         ball.shieldUses = SHIELD_USES_PER_ROUND
+        ball.stoneUses = STONE_USES
         ball.bombUses = 0
         ball.x = cx - arenaR * 0.25
       } else {
         ball.control = 'arrows'
         ball.shieldUses = 0
+        ball.stoneUses = 0
         ball.bombUses = BOMB_USES_PER_ROUND
         ball.x = cx + arenaR * 0.25
       }
       ball.y = cy
       keepInArena(ball)
       spawnBurst(ball.x, ball.y, 1.2)
+    }
+
+    function endBossFight(playerWon) {
+      if (playerWon) {
+        if (bossDamageRed > bossDamageBlue) {
+          redCoins += BOSS_KILL_REWARD
+        } else if (bossDamageBlue > bossDamageRed) {
+          blueCoins += BOSS_KILL_REWARD
+        } else {
+          // lika skada → båda får belöningen
+          redCoins += BOSS_KILL_REWARD
+          blueCoins += BOSS_KILL_REWARD
+        }
+      }
+      spawnBurst(cx, cy, playerWon ? 3 : 1.5)
+      shake = Math.min(22, shake + 12)
+      flash = Math.min(0.7, flash + 0.35)
+      triggerCheer()
+      bossMode = false
+      bossReady = false
+      bossRespawnsLeft = BOSS_RESPAWNS
+      bossDamageRed = 0
+      bossDamageBlue = 0
+      resetMatch()
+    }
+
+    function skipBossFight() {
+      if (!bossReady || !winner) return
+      // 100% 10 guldpengar till vinnaren när bossen skippas
+      if (winner === 'red') redCoins += BOSS_SKIP_REWARD
+      else blueCoins += BOSS_SKIP_REWARD
+
+      winner = null
+      winnerUntil = 0
+      bossReady = false
+      redScore = 0
+      blueScore = 0
+      stones.length = 0
+      bombs.length = 0
+      bodyguards.length = 0
+      clearKeys()
+      resetFighters()
+      spawnBurst(cx, cy, 1.2)
+      triggerCheer()
+    }
+
+    function startBossFight() {
+      bossMode = true
+      bossReady = false
+      winner = null
+      winnerUntil = 0
+      bossRespawnsLeft = BOSS_RESPAWNS
+      bossDamageRed = 0
+      bossDamageBlue = 0
+      stones.length = 0
+      bombs.length = 0
+      bodyguards.length = 0
+      fighters.length = 0
+      clearKeys()
+
+      const red = makeFighter(cx - arenaR * 0.3, cy, 0, 0, 0, true)
+      red._bossSide = 'red'
+      red.maxLives = RESPAWN_LIVES
+      red.lives = RESPAWN_LIVES
+      red.bossRespawnsLeft = BOSS_RESPAWNS
+      red.control = 'wasd'
+      red.player = true
+      red.shieldUses = SHIELD_USES_PER_ROUND
+      red.stoneUses = STONE_USES
+      red.bombUses = 0
+      red.eliminated = false
+
+      const blue = makeFighter(cx + arenaR * 0.3, cy, 0, 0, 1, false)
+      blue._bossSide = 'blue'
+      blue.maxLives = RESPAWN_LIVES
+      blue.lives = RESPAWN_LIVES
+      blue.bossRespawnsLeft = BOSS_RESPAWNS
+      blue.control = 'arrows'
+      blue.player = false
+      blue.shieldUses = 0
+      blue.stoneUses = 0
+      blue.bombUses = BOSS_BOMBS
+      blue.eliminated = false
+
+      const boss = makeFighter(cx, cy - arenaR * 0.2, 0, 0, 5, false)
+      boss.isBoss = true
+      boss.control = null
+      boss.player = false
+      boss.maxLives = BOSS_HP
+      boss.lives = BOSS_HP
+      boss.color = '#3b0a5c'
+      boss.glow = '#ff2d6a'
+      boss.anger = 1
+      boss.bombUses = 0
+      boss.shieldUses = 0
+      boss.eliminated = false
+
+      fighters.push(red, blue, boss)
+      keepInArena(red)
+      keepInArena(blue)
+      keepInArena(boss)
+      spawnBurst(boss.x, boss.y, 2)
+      triggerCheer()
     }
 
     function removeDeadFighters() {
@@ -838,11 +1062,41 @@ function FightingBalls() {
 
         if (ball.lives > 0 || ball.eliminated) continue
 
-        // Just died → start 3-2-1 countdown
+        // Just died
         spawnBurst(ball.x, ball.y, 2)
         shake = Math.min(18, shake + 8)
         flash = Math.min(0.55, flash + 0.2)
         triggerCheer()
+
+        if (bossMode) {
+          if (ball.isBoss) {
+            ball.lives = 0
+            ball.vx = 0
+            ball.vy = 0
+            ball.eliminated = true
+            ball.control = null
+            endBossFight(true)
+            return
+          }
+
+          ball.lives = 0
+          ball.vx = 0
+          ball.vy = 0
+          ball.eliminated = true
+          ball.control = null
+
+          if ((ball.bossRespawnsLeft || 0) > 0) {
+            ball.bossRespawnsLeft -= 1
+            ball.respawnAt = now + RESPAWN_COUNTDOWN_MS
+          } else {
+            ball.respawnAt = 0
+            if (allHeroesDefeated()) {
+              endBossFight(false)
+              return
+            }
+          }
+          continue
+        }
 
         const reward = rollKillCoins()
         if (!ball.player && ball.control === 'arrows') {
@@ -850,14 +1104,16 @@ function FightingBalls() {
           redScore += 1
           if (redScore >= WIN_SCORE && !winner) {
             winner = 'red'
-            winnerUntil = now + 4000
+            winnerUntil = now + 2500
+            bossReady = true
           }
         } else if (ball.player) {
           blueCoins += reward
           blueScore += 1
           if (blueScore >= WIN_SCORE && !winner) {
             winner = 'blue'
-            winnerUntil = now + 4000
+            winnerUntil = now + 2500
+            bossReady = true
           }
         }
 
@@ -870,8 +1126,7 @@ function FightingBalls() {
       }
     }
 
-    function drawRespawnCountdowns() {
-      const now = performance.now()
+    function drawRespawnCountdowns(now = performance.now()) {
       for (let i = 0; i < fighters.length; i += 1) {
         const ball = fighters[i]
         if (!ball.eliminated || !ball.respawnAt) continue
@@ -891,6 +1146,42 @@ function FightingBalls() {
         ctx.fillText(String(n), ball.x, ball.y)
         ctx.restore()
       }
+    }
+
+    function shiftPausedTimers(ms) {
+      if (ms <= 0) return
+      for (let i = 0; i < fighters.length; i += 1) {
+        const f = fighters[i]
+        if (f.respawnAt > 0) f.respawnAt += ms
+        if (f.shieldUntil > 0) f.shieldUntil += ms
+        if (f.hitUntil > 0) f.hitUntil += ms
+        if (f.coolUntil > 0) f.coolUntil += ms
+        if (f.stoneReadyAt > 0) f.stoneReadyAt += ms
+      }
+      for (let i = 0; i < bombs.length; i += 1) {
+        if (bombs[i].fuseUntil > 0) bombs[i].fuseUntil += ms
+      }
+      for (let i = 0; i < bodyguards.length; i += 1) {
+        bodyguards[i].expiresAt += ms
+        bodyguards[i].nextTick += ms
+      }
+      if (winnerUntil > 0) winnerUntil += ms
+    }
+
+    function openShop() {
+      if (shopOpen || winner) return
+      clearKeys()
+      shopPausedAt = performance.now()
+      shopOpen = true
+    }
+
+    function closeShop() {
+      if (!shopOpen) return
+      if (shopPausedAt > 0) {
+        shiftPausedTimers(performance.now() - shopPausedAt)
+        shopPausedAt = 0
+      }
+      shopOpen = false
     }
 
     function drawCoin(x, y, size) {
@@ -922,10 +1213,14 @@ function FightingBalls() {
         if (redCoins < GOLD_STONE_COST) return
         redCoins -= GOLD_STONE_COST
         inventory.goldStone += 1
-      } else if (id === 'sword') {
-        if (redCoins < SWORD_COST) return
-        redCoins -= SWORD_COST
-        inventory.sword += 1
+      } else if (id === 'lifeDrinkRed') {
+        if (redCoins < LIFE_DRINK_COST) return
+        redCoins -= LIFE_DRINK_COST
+        inventory.lifeDrinkRed += 1
+      } else if (id === 'lifeDrinkBlue') {
+        if (blueCoins < LIFE_DRINK_COST) return
+        blueCoins -= LIFE_DRINK_COST
+        inventory.lifeDrinkBlue += 1
       } else if (id === 'goldBomb') {
         if (blueCoins < GOLD_BOMB_COST) return
         blueCoins -= GOLD_BOMB_COST
@@ -939,8 +1234,145 @@ function FightingBalls() {
         const blue = fighters.find((f) => f.control === 'arrows')
         if (!blue || blueCoins < 2) return
         blueCoins -= 2
-        blue.bombUses = Math.min(BOMB_USES_PER_ROUND, (blue.bombUses || 0) + 1)
+        const maxBombs = bossMode ? BOSS_BOMBS : BOMB_USES_PER_ROUND
+        blue.bombUses = Math.min(maxBombs, (blue.bombUses || 0) + 1)
+      } else if (id === 'bodyguardRed') {
+        if (redCoins < BODYGUARD_COST) return
+        const red = fighters.find((f) => f.player && !f.eliminated)
+        const target = bossMode
+          ? fighters.find((f) => f.isBoss && !f.eliminated)
+          : fighters.find((f) => f.control === 'arrows' && !f.eliminated)
+        if (!red || !target) return
+        redCoins -= BODYGUARD_COST
+        spawnBodyguard(red, target)
+      } else if (id === 'bodyguardBlue') {
+        if (blueCoins < BODYGUARD_COST) return
+        const blue = fighters.find((f) => f.control === 'arrows' && !f.eliminated)
+        const target = bossMode
+          ? fighters.find((f) => f.isBoss && !f.eliminated)
+          : fighters.find((f) => f.player && !f.eliminated)
+        if (!blue || !target) return
+        blueCoins -= BODYGUARD_COST
+        spawnBodyguard(blue, target)
       }
+    }
+
+    function spawnBodyguard(owner, target) {
+      // Om shoppen är pausad: använd fryst tid så duration blir rätt efter closeShop()
+      const now = shopOpen && shopPausedAt > 0 ? shopPausedAt : performance.now()
+      const dx = target.x - owner.x
+      const dy = target.y - owner.y
+      const dist = Math.hypot(dx, dy) || 1
+      bodyguards.push({
+        x: owner.x + (dx / dist) * (ballR + BODYGUARD_RADIUS),
+        y: owner.y + (dy / dist) * (ballR + BODYGUARD_RADIUS),
+        vx: 0,
+        vy: 0,
+        r: BODYGUARD_RADIUS,
+        owner,
+        target,
+        expiresAt: now + BODYGUARD_DURATION_MS,
+        nextTick: now + BODYGUARD_TICK_MS,
+        squash: 0,
+      })
+    }
+
+    function updateBodyguards(dt, now) {
+      for (let i = bodyguards.length - 1; i >= 0; i -= 1) {
+        const g = bodyguards[i]
+        if (now >= g.expiresAt || !g.target || g.target.eliminated || g.target.lives <= 0) {
+          spawnBurst(g.x, g.y, 0.8)
+          bodyguards.splice(i, 1)
+          continue
+        }
+
+        const dx = g.target.x - g.x
+        const dy = g.target.y - g.y
+        const dist = Math.hypot(dx, dy) || 1
+        g.vx += (dx / dist) * 0.55 * dt
+        g.vy += (dy / dist) * 0.55 * dt
+        g.vx *= 0.94
+        g.vy *= 0.94
+        const speed = Math.hypot(g.vx, g.vy)
+        if (speed > BODYGUARD_SPEED) {
+          g.vx = (g.vx / speed) * BODYGUARD_SPEED
+          g.vy = (g.vy / speed) * BODYGUARD_SPEED
+        }
+        g.x += g.vx * dt
+        g.y += g.vy * dt
+        g.squash *= 0.88
+
+        // Keep roughly in arena
+        const adx = g.x - cx
+        const ady = g.y - cy
+        const adist = Math.hypot(adx, ady)
+        const limit = arenaR - g.r
+        if (adist > limit) {
+          g.x = cx + (adx / adist) * limit
+          g.y = cy + (ady / adist) * limit
+        }
+
+        if (now >= g.nextTick) {
+          const near = Math.hypot(g.target.x - g.x, g.target.y - g.y)
+          if (near < ballR + g.r + 8) {
+            const shielded =
+              g.target.player && now < g.target.shieldUntil
+            if (!shielded) {
+              g.target.lives -= BODYGUARD_DAMAGE
+              g.target.squash = 0.4
+              if (g.target.isBoss) addBossDamage(g.owner, BODYGUARD_DAMAGE)
+              spawnBurst(g.x, g.y, 0.6)
+            }
+            g.squash = 0.35
+          }
+          g.nextTick = now + BODYGUARD_TICK_MS
+        }
+      }
+    }
+
+    function drawBodyguard(g) {
+      const squash = Math.min(0.4, g.squash || 0)
+      ctx.save()
+      ctx.translate(g.x, g.y)
+      ctx.scale(1 + squash * 0.2, Math.max(0.75, 1 - squash * 0.2))
+
+      const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, g.r * 2.2)
+      glow.addColorStop(0, 'rgba(200, 120, 255, 0.55)')
+      glow.addColorStop(1, 'transparent')
+      ctx.fillStyle = glow
+      ctx.beginPath()
+      ctx.arc(0, 0, g.r * 2.2, 0, Math.PI * 2)
+      ctx.fill()
+
+      const body = ctx.createRadialGradient(-g.r * 0.3, -g.r * 0.3, 2, 0, 0, g.r)
+      body.addColorStop(0, '#f0d0ff')
+      body.addColorStop(0.35, '#c084fc')
+      body.addColorStop(1, '#7c3aed')
+      ctx.fillStyle = body
+      ctx.beginPath()
+      ctx.arc(0, 0, g.r, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.strokeStyle = '#e9d5ff'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(0, 0, g.r, 0, Math.PI * 2)
+      ctx.stroke()
+
+      // Angry little face
+      ctx.fillStyle = '#2e1065'
+      ctx.beginPath()
+      ctx.arc(-5, -2, 2.2, 0, Math.PI * 2)
+      ctx.arc(5, -2, 2.2, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = '#2e1065'
+      ctx.lineWidth = 1.8
+      ctx.beginPath()
+      ctx.moveTo(-5, 5)
+      ctx.quadraticCurveTo(0, 9, 5, 5)
+      ctx.stroke()
+
+      ctx.restore()
     }
 
     function drawShopButton() {
@@ -976,7 +1408,7 @@ function FightingBalls() {
       if (!shopOpen) return
 
       const panelW = Math.min(420, width * 0.9)
-      const panelH = Math.min(380, height * 0.7)
+      const panelH = Math.min(520, height * 0.82)
       const px = width * 0.5 - panelW * 0.5
       const py = height * 0.5 - panelH * 0.5
 
@@ -1014,13 +1446,13 @@ function FightingBalls() {
           canBuy: redCoins >= GOLD_STONE_COST,
         },
         {
-          id: 'sword',
-          title: 'Svärd',
-          desc: `R · ${SWORD_DAMAGE} skada`,
-          cost: SWORD_COST,
+          id: 'lifeDrinkRed',
+          title: 'Livedryck',
+          desc: `R · +${LIFE_DRINK_HEAL} liv`,
+          cost: LIFE_DRINK_COST,
           side: 'Röd',
-          owned: inventory.sword,
-          canBuy: redCoins >= SWORD_COST,
+          owned: inventory.lifeDrinkRed,
+          canBuy: redCoins >= LIFE_DRINK_COST,
         },
         {
           id: 'shield',
@@ -1041,6 +1473,15 @@ function FightingBalls() {
           canBuy: blueCoins >= GOLD_BOMB_COST,
         },
         {
+          id: 'lifeDrinkBlue',
+          title: 'Livedryck',
+          desc: `2 · +${LIFE_DRINK_HEAL} liv`,
+          cost: LIFE_DRINK_COST,
+          side: 'Blå',
+          owned: inventory.lifeDrinkBlue,
+          canBuy: blueCoins >= LIFE_DRINK_COST,
+        },
+        {
           id: 'bombUse',
           title: 'Extra bomb',
           desc: '1 · +1 vanlig bomb',
@@ -1049,10 +1490,28 @@ function FightingBalls() {
           owned: fighters.find((f) => f.control === 'arrows')?.bombUses ?? 0,
           canBuy: blueCoins >= 2,
         },
+        {
+          id: 'bodyguardRed',
+          title: 'Bodyguard',
+          desc: 'Lila · 1/sek · 6.7s',
+          cost: BODYGUARD_COST,
+          side: 'Röd',
+          owned: bodyguards.filter((g) => g.owner?.player).length,
+          canBuy: redCoins >= BODYGUARD_COST,
+        },
+        {
+          id: 'bodyguardBlue',
+          title: 'Bodyguard',
+          desc: 'Lila · 1/sek · 6.7s',
+          cost: BODYGUARD_COST,
+          side: 'Blå',
+          owned: bodyguards.filter((g) => g.owner && !g.owner.player).length,
+          canBuy: blueCoins >= BODYGUARD_COST,
+        },
       ]
 
       const startY = py + 88
-      const rowH = 48
+      const rowH = 44
       items.forEach((item, i) => {
         const y = startY + i * rowH
         const bx = px + panelW - 108
@@ -1129,32 +1588,114 @@ function FightingBalls() {
       ctx.fillRect(0, 0, width, height)
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.font = 'bold 72px Syne, sans-serif'
+      ctx.font = 'bold 64px Syne, sans-serif'
       ctx.fillStyle = winner === 'red' ? '#ff6b5a' : '#5ec8ff'
       ctx.strokeStyle = 'rgba(0,0,0,0.5)'
       ctx.lineWidth = 10
       const label = winner === 'red' ? 'RÖD VINNER!' : 'BLÅ VINNER!'
-      ctx.strokeText(label, width * 0.5, height * 0.45)
-      ctx.fillText(label, width * 0.5, height * 0.45)
-      ctx.font = '600 22px Figtree, sans-serif'
+      ctx.strokeText(label, width * 0.5, height * 0.32)
+      ctx.fillText(label, width * 0.5, height * 0.32)
+      ctx.font = '600 20px Figtree, sans-serif'
       ctx.fillStyle = 'rgba(255,255,255,0.8)'
-      ctx.fillText('Ny match startar snart…', width * 0.5, height * 0.55)
+      ctx.fillText('BOSS = fighta · NEJ = fortsätt (+10 guld)', width * 0.5, height * 0.42)
+      ctx.restore()
+    }
+
+    function drawBossButton() {
+      if (!bossReady || !winner) {
+        bossButton = { x: 0, y: 0, w: 0, h: 0 }
+        skipBossButton = { x: 0, y: 0, w: 0, h: 0 }
+        return
+      }
+      const w = 180
+      const h = 58
+      const gap = 18
+      const bossX = width * 0.5 - w - gap * 0.5
+      const skipX = width * 0.5 + gap * 0.5
+      const y = height * 0.52
+      bossButton = { x: bossX, y, w, h }
+      skipBossButton = { x: skipX, y, w, h }
+
+      ctx.save()
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+
+      // BOSS
+      const bossGrad = ctx.createLinearGradient(bossX, y, bossX, y + h)
+      bossGrad.addColorStop(0, '#ff4d6d')
+      bossGrad.addColorStop(1, '#7c1d3a')
+      ctx.fillStyle = bossGrad
+      ctx.strokeStyle = '#ffb3c1'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(bossX, y, w, h, 14)
+      else ctx.rect(bossX, y, w, h)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = '#fff5f7'
+      ctx.font = 'bold 26px Syne, sans-serif'
+      ctx.fillText('BOSS', bossX + w * 0.5, y + h * 0.5)
+
+      // NEJ
+      const skipGrad = ctx.createLinearGradient(skipX, y, skipX, y + h)
+      skipGrad.addColorStop(0, '#6b7280')
+      skipGrad.addColorStop(1, '#374151')
+      ctx.fillStyle = skipGrad
+      ctx.strokeStyle = '#d1d5db'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(skipX, y, w, h, 14)
+      else ctx.rect(skipX, y, w, h)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = '#f9fafb'
+      ctx.fillText('NEJ', skipX + w * 0.5, y + h * 0.5)
+
+      ctx.font = '600 14px Figtree, sans-serif'
+      ctx.fillStyle = 'rgba(255,233,160,0.9)'
+      ctx.fillText('+10 guld om du skippar', width * 0.5, y + h + 28)
+      ctx.restore()
+    }
+
+    function drawBossHud() {
+      if (!bossMode) return
+      const red = fighters.find((f) => f._bossSide === 'red')
+      const blue = fighters.find((f) => f._bossSide === 'blue')
+      const redLeft = red ? red.bossRespawnsLeft ?? 0 : 0
+      const blueLeft = blue ? blue.bossRespawnsLeft ?? 0 : 0
+      ctx.save()
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.font = 'bold 16px Figtree, sans-serif'
+      ctx.fillStyle = 'rgba(255,200,220,0.9)'
+      ctx.fillText(
+        `Boss · respawn R:${redLeft} B:${blueLeft} · skada R:${bossDamageRed} B:${bossDamageBlue}`,
+        width * 0.5,
+        56,
+      )
       ctx.restore()
     }
 
     function resetMatch() {
       redScore = 0
       blueScore = 0
-      redCoins = 0
-      blueCoins = 0
+      // Guldpengar behålls mellan matcher
       winner = null
       winnerUntil = 0
+      bossReady = false
+      bossMode = false
+      bossRespawnsLeft = BOSS_RESPAWNS
+      bossDamageRed = 0
+      bossDamageBlue = 0
       stones.length = 0
       bombs.length = 0
+      bodyguards.length = 0
       inventory.goldStone = 0
-      inventory.sword = 0
+      inventory.lifeDrinkRed = 0
+      inventory.lifeDrinkBlue = 0
       inventory.goldBomb = 0
       shopOpen = false
+      shopPausedAt = 0
       resetFighters()
     }
 
@@ -1435,20 +1976,35 @@ function FightingBalls() {
         const maxLives = ball.maxLives || PLAYER_LIVES
         const lives = Math.max(0, ball.lives)
         const pipR = Math.max(2.2, r * 0.1)
-        const gap = pipR * 2.3
-        const totalW = (maxLives - 1) * gap
-        const startX = ball.x - totalW / 2
         const pipY = ball.y - r - pipR * 3
-        for (let i = 0; i < maxLives; i += 1) {
-          ctx.beginPath()
-          ctx.arc(startX + i * gap, pipY, pipR, 0, Math.PI * 2)
-          if (i < lives) {
-            ctx.fillStyle = ball.player ? '#ff5a5a' : '#5ab8ff'
-            ctx.fill()
-          } else {
-            ctx.strokeStyle = 'rgba(255,255,255,0.25)'
-            ctx.lineWidth = 1.5
-            ctx.stroke()
+
+        if (ball.isBoss || maxLives > 15) {
+          ctx.save()
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.font = `bold ${Math.max(16, Math.floor(r * 0.35))}px Syne, sans-serif`
+          ctx.fillStyle = '#ff6b9a'
+          ctx.strokeStyle = 'rgba(0,0,0,0.55)'
+          ctx.lineWidth = 4
+          const label = `${lives}`
+          ctx.strokeText(label, ball.x, pipY)
+          ctx.fillText(label, ball.x, pipY)
+          ctx.restore()
+        } else {
+          const gap = pipR * 2.3
+          const totalW = (maxLives - 1) * gap
+          const startX = ball.x - totalW / 2
+          for (let i = 0; i < maxLives; i += 1) {
+            ctx.beginPath()
+            ctx.arc(startX + i * gap, pipY, pipR, 0, Math.PI * 2)
+            if (i < lives) {
+              ctx.fillStyle = ball.player ? '#ff5a5a' : '#5ab8ff'
+              ctx.fill()
+            } else {
+              ctx.strokeStyle = 'rgba(255,255,255,0.25)'
+              ctx.lineWidth = 1.5
+              ctx.stroke()
+            }
           }
         }
 
@@ -1471,16 +2027,27 @@ function FightingBalls() {
               ctx.stroke()
             }
           }
+
+          // Stone count (Q)
+          const stonesLeft = Math.max(0, ball.stoneUses || 0)
+          ctx.save()
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.font = `bold ${Math.max(11, Math.floor(r * 0.22))}px Figtree, sans-serif`
+          ctx.fillStyle = '#d4d4d8'
+          ctx.fillText(`sten ${stonesLeft}`, ball.x, sY - pipR * 3.2)
+          ctx.restore()
         }
 
         // Remaining bomb uses for blue
         if (ball.control === 'arrows') {
           const uses = Math.max(0, ball.bombUses || 0)
+          const maxBombs = bossMode ? BOSS_BOMBS : BOMB_USES_PER_ROUND
           const sGap = pipR * 2.6
-          const sTotal = (BOMB_USES_PER_ROUND - 1) * sGap
+          const sTotal = Math.max(0, maxBombs - 1) * sGap
           const sStart = ball.x - sTotal / 2
           const sY = pipY - pipR * 3
-          for (let i = 0; i < BOMB_USES_PER_ROUND; i += 1) {
+          for (let i = 0; i < maxBombs; i += 1) {
             ctx.beginPath()
             ctx.arc(sStart + i * sGap, sY, pipR * 0.9, 0, Math.PI * 2)
             if (i < uses) {
@@ -1508,18 +2075,50 @@ function FightingBalls() {
         spawnCooldown = Math.max(0, spawnCooldown - dt / 60)
 
         if (winner) {
-          // Freeze action while winner banner shows
+          // Freeze action — winner can enter boss fight
+          last = now
+          bossReady = true
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
           ctx.clearRect(0, 0, width, height)
           drawArena(now)
           for (let i = 0; i < fighters.length; i += 1) {
-            drawBall(fighters[i], ballR, false)
+            drawBall(fighters[i], getRadius(fighters[i]), false)
           }
           drawScores()
           drawShopButton()
           drawGoldCoins()
           drawWinner()
-          if (now >= winnerUntil) resetMatch()
+          drawBossButton()
+          return
+        }
+
+        // Shop open → pause the round (no physics / abilities tick)
+        if (shopOpen) {
+          last = now
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+          ctx.clearRect(0, 0, width, height)
+          drawArena(now)
+          for (let i = 0; i < spectators.length; i += 1) {
+            drawBall(spectators[i], spectatorR, true)
+          }
+          for (let i = 0; i < fighters.length; i += 1) {
+            drawBall(fighters[i], getRadius(fighters[i]), false)
+          }
+          for (let i = 0; i < stones.length; i += 1) {
+            drawStone(stones[i])
+          }
+          for (let i = 0; i < bombs.length; i += 1) {
+            drawBomb(bombs[i])
+          }
+          for (let i = 0; i < bodyguards.length; i += 1) {
+            drawBodyguard(bodyguards[i])
+          }
+          drawScores()
+          drawShopButton()
+          drawGoldCoins()
+          drawRespawnCountdowns(shopPausedAt || now)
+          drawBossHud()
+          drawShop()
           return
         }
 
@@ -1533,10 +2132,10 @@ function FightingBalls() {
           }
         }
 
-        removeDeadFighters()
-
         updateStones(dt, now)
         updateBombs(dt)
+        updateBodyguards(dt, now)
+        removeDeadFighters()
         updateSpectators(dt, now)
 
         shake *= 0.85
@@ -1590,7 +2189,7 @@ function FightingBalls() {
         }
 
         for (let i = 0; i < fighters.length; i += 1) {
-          drawBall(fighters[i], ballR, false)
+          drawBall(fighters[i], getRadius(fighters[i]), false)
         }
 
         for (let i = 0; i < stones.length; i += 1) {
@@ -1601,6 +2200,10 @@ function FightingBalls() {
           drawBomb(bombs[i])
         }
 
+        for (let i = 0; i < bodyguards.length; i += 1) {
+          drawBodyguard(bodyguards[i])
+        }
+
         ctx.restore()
 
         // HUD
@@ -1608,12 +2211,10 @@ function FightingBalls() {
         drawShopButton()
         drawGoldCoins()
         drawRespawnCountdowns()
+        drawBossHud()
         drawShop()
         drawWinner()
-
-        if (winner && now >= winnerUntil) {
-          resetMatch()
-        }
+        drawBossButton()
 
         if (flash > 0.02) {
           ctx.fillStyle = `rgba(255,250,230,${flash * 0.35})`
@@ -1627,12 +2228,38 @@ function FightingBalls() {
     resize()
     window.addEventListener('resize', resize)
 
+    function useLifeDrink(fighter, side) {
+      if (!fighter || fighter.eliminated || fighter.lives <= 0) return
+      if (side === 'red') {
+        if (inventory.lifeDrinkRed <= 0) return
+        inventory.lifeDrinkRed -= 1
+      } else {
+        if (inventory.lifeDrinkBlue <= 0) return
+        inventory.lifeDrinkBlue -= 1
+      }
+      fighter.lives += LIFE_DRINK_HEAL
+      fighter.squash = 0.35
+      spawnBurst(fighter.x, fighter.y, 1.1)
+    }
+
+    function clearKeys() {
+      keys.w = false
+      keys.a = false
+      keys.s = false
+      keys.d = false
+      keys.up = false
+      keys.down = false
+      keys.left = false
+      keys.right = false
+    }
+
     function onKeyDown(e) {
       const k = e.key.toLowerCase()
       if (k === 'escape') {
-        shopOpen = false
+        closeShop()
         return
       }
+      if (shopOpen) return
       if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
         keys[k] = true
         e.preventDefault()
@@ -1663,6 +2290,8 @@ function FightingBalls() {
         const player = fighters.find((f) => f.player)
         if (
           player &&
+          !player.eliminated &&
+          player.lives > 0 &&
           player.shieldUses > 0 &&
           performance.now() >= player.shieldUntil
         ) {
@@ -1686,13 +2315,19 @@ function FightingBalls() {
       if (k === 'r' && !e.repeat) {
         e.preventDefault()
         const player = fighters.find((f) => f.player)
-        if (player) throwStone(player, { sword: true })
+        if (player) useLifeDrink(player, 'red')
         return
       }
       if ((k === '1' || e.code === 'Digit1' || e.code === 'Numpad1') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
         if (blue) throwBomb(blue)
+        return
+      }
+      if ((k === '2' || e.code === 'Digit2' || e.code === 'Numpad2') && !e.repeat) {
+        e.preventDefault()
+        const blue = fighters.find((f) => f.control === 'arrows')
+        if (blue) useLifeDrink(blue, 'blue')
         return
       }
       if ((k === '0' || e.code === 'Digit0' || e.code === 'Numpad0') && !e.repeat) {
@@ -1748,27 +2383,41 @@ function FightingBalls() {
     function onPointerDown(e) {
       const { x: px, y: py } = canvasPos(e)
 
+      if (bossReady && winner && hitRect(px, py, bossButton)) {
+        startBossFight()
+        return
+      }
+      if (bossReady && winner && hitRect(px, py, skipBossButton)) {
+        skipBossFight()
+        return
+      }
+
       if (shopOpen) {
         for (let i = shopHits.length - 1; i >= 0; i -= 1) {
           const hit = shopHits[i]
           if (!hitRect(px, py, hit)) continue
-          if (hit.id === 'close') shopOpen = false
+          if (hit.id === 'close') closeShop()
           else buyShopItem(hit.id)
           return
         }
         // click outside panel closes
-        shopOpen = false
+        closeShop()
         return
       }
 
+      if (winner) return
+
       if (hitRect(px, py, shopButton)) {
-        shopOpen = true
+        openShop()
       }
     }
 
     function onPointerMove(e) {
       const { x: px, y: py } = canvasPos(e)
       let over = hitRect(px, py, shopButton)
+      if (bossReady && winner && (hitRect(px, py, bossButton) || hitRect(px, py, skipBossButton))) {
+        over = true
+      }
       if (shopOpen) {
         over = shopHits.some((h) => hitRect(px, py, h))
       }
