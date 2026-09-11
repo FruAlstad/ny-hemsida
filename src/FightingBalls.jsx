@@ -2,9 +2,9 @@ import { useEffect, useRef } from 'react'
 
 const MAX_FIGHTERS = 2
 const SPECTATOR_COUNT = 18
-const PLAYER_LIVES = 7
-const ENEMY_LIVES = 10
-const PLAYER_HIT_DAMAGE = 2
+const PLAYER_LIVES = 23
+const ENEMY_LIVES = 26
+const PLAYER_HIT_DAMAGE = 3
 const ENEMY_HIT_DAMAGE = 2
 const SHIELD_DURATION = 2500
 const SHIELD_USES_PER_ROUND = 3
@@ -28,7 +28,7 @@ const GOLD_BOMB_COST = 4
 const GOLD_BOMB_DAMAGE = 5
 const GOLD_BOMB_COOLDOWN = 700
 const GOLD_BOMB_FUSE_MS = 800
-const BODYGUARD_COST = 10
+const BODYGUARD_COST = 5
 const BODYGUARD_DURATION_MS = 6700
 const BODYGUARD_DAMAGE = 1
 const BODYGUARD_TICK_MS = 1000
@@ -52,10 +52,13 @@ const BOMB_RADIUS = 14
 const BOMB_FUSE_MS = 200
 const BOMB_BLAST = 110
 const BOMB_USES_PER_ROUND = 3
-const RESPAWN_LIVES = 10
+const RESPAWN_LIVES = 23
+const RESPAWN_LIVES_BLUE = 26
 const RESPAWN_COUNTDOWN_MS = 3000
-const WIN_SCORE = 10
-const BOSS_HP = 50
+const WIN_SCORE = 30
+const BOSS_SCORE = 15
+const SHOP_UNLOCK_SCORE = 5
+const BOSS_HP = 167
 const BOSS_DAMAGE = 3
 const BOSS_TOUCH_DAMAGE = 2
 const BOSS_RESPAWNS = 5
@@ -63,7 +66,7 @@ const BOSS_BOMBS = 5
 const BOSS_SCALE = 1.5
 const BOSS_MAX_SPEED = 4.2
 const BOSS_ACCEL = 0.32
-const BOSS_KILL_REWARD = 15
+const BOSS_KILL_REWARD = 50
 const BOSS_SKIP_REWARD = 10
 
 const PALETTE = [
@@ -109,17 +112,16 @@ function FightingBalls() {
     let blueScore = 0
     let winner = null // 'red' | 'blue'
     let winnerUntil = 0
-    let bossReady = false
     let bossMode = false
     let bossRespawnsLeft = BOSS_RESPAWNS
     let bossDamageRed = 0
     let bossDamageBlue = 0
-    let bossButton = { x: 0, y: 0, w: 0, h: 0 }
-    let skipBossButton = { x: 0, y: 0, w: 0, h: 0 }
+    let lastBossKiller = null // 'red' | 'blue'
+    let bossTriggeredThisMatch = false
     let shopOpen = false
     let shopPausedAt = 0
     let shopButton = { x: 0, y: 0, w: 120, h: 42 }
-    const shopHits = [] // clickable item rects {x,y,w,h,id}
+    const shopHits = []
     const inventory = {
       goldStone: 0,
       lifeDrinkRed: 0,
@@ -810,8 +812,12 @@ function FightingBalls() {
           if (!shielded) {
             hero.lives -= BOSS_DAMAGE
           }
-          boss.lives -= BOSS_TOUCH_DAMAGE
-          addBossDamage(hero, BOSS_TOUCH_DAMAGE)
+          const touchDmg =
+            hero.control === 'wasd' || hero.player
+              ? PLAYER_HIT_DAMAGE
+              : BOSS_TOUCH_DAMAGE
+          boss.lives -= touchDmg
+          addBossDamage(hero, touchDmg)
           boss.anger = 1
         } else if (bossMode) {
           // Lagkamrater skadar inte varandra under bossfight
@@ -875,8 +881,10 @@ function FightingBalls() {
       if (attacker.isBoss) return
       if (attacker.player || attacker.control === 'wasd' || attacker._bossSide === 'red') {
         bossDamageRed += amount
+        lastBossKiller = 'red'
       } else if (attacker.control === 'arrows' || attacker._bossSide === 'blue') {
         bossDamageBlue += amount
+        lastBossKiller = 'blue'
       }
     }
 
@@ -891,8 +899,9 @@ function FightingBalls() {
     }
 
     function reviveFighter(ball, now) {
-      ball.maxLives = RESPAWN_LIVES
-      ball.lives = RESPAWN_LIVES
+      const isRed = ball.player || ball._bossSide === 'red'
+      ball.maxLives = isRed ? PLAYER_LIVES : ENEMY_LIVES
+      ball.lives = ball.maxLives
       ball.vx = 0
       ball.vy = 0
       ball.squash = 0
@@ -905,7 +914,7 @@ function FightingBalls() {
       ball.bombReadyAt = 0
 
       if (bossMode) {
-        if (ball.player || ball._bossSide === 'red') {
+        if (isRed) {
           ball.control = 'wasd'
           ball.player = true
           ball._bossSide = 'red'
@@ -947,13 +956,14 @@ function FightingBalls() {
 
     function endBossFight(playerWon) {
       if (playerWon) {
-        if (bossDamageRed > bossDamageBlue) {
+        // Den som tar sista slaget får belöningen
+        if (lastBossKiller === 'red') {
           redCoins += BOSS_KILL_REWARD
-        } else if (bossDamageBlue > bossDamageRed) {
+        } else if (lastBossKiller === 'blue') {
           blueCoins += BOSS_KILL_REWARD
-        } else {
-          // lika skada → båda får belöningen
+        } else if (bossDamageRed >= bossDamageBlue) {
           redCoins += BOSS_KILL_REWARD
+        } else {
           blueCoins += BOSS_KILL_REWARD
         }
       }
@@ -962,41 +972,28 @@ function FightingBalls() {
       flash = Math.min(0.7, flash + 0.35)
       triggerCheer()
       bossMode = false
-      bossReady = false
       bossRespawnsLeft = BOSS_RESPAWNS
       bossDamageRed = 0
       bossDamageBlue = 0
-      resetMatch()
-    }
-
-    function skipBossFight() {
-      if (!bossReady || !winner) return
-      // 100% 10 guldpengar till vinnaren när bossen skippas
-      if (winner === 'red') redCoins += BOSS_SKIP_REWARD
-      else blueCoins += BOSS_SKIP_REWARD
-
-      winner = null
-      winnerUntil = 0
-      bossReady = false
-      redScore = 0
-      blueScore = 0
+      lastBossKiller = null
+      shopOpen = false
+      shopPausedAt = 0
       stones.length = 0
       bombs.length = 0
       bodyguards.length = 0
       clearKeys()
+      // Behåll poäng/guld — fortsätt mot 30
       resetFighters()
-      spawnBurst(cx, cy, 1.2)
-      triggerCheer()
     }
 
     function startBossFight() {
       bossMode = true
-      bossReady = false
       winner = null
       winnerUntil = 0
       bossRespawnsLeft = BOSS_RESPAWNS
       bossDamageRed = 0
       bossDamageBlue = 0
+      lastBossKiller = null
       stones.length = 0
       bombs.length = 0
       bodyguards.length = 0
@@ -1005,8 +1002,8 @@ function FightingBalls() {
 
       const red = makeFighter(cx - arenaR * 0.3, cy, 0, 0, 0, true)
       red._bossSide = 'red'
-      red.maxLives = RESPAWN_LIVES
-      red.lives = RESPAWN_LIVES
+      red.maxLives = PLAYER_LIVES
+      red.lives = PLAYER_LIVES
       red.bossRespawnsLeft = BOSS_RESPAWNS
       red.control = 'wasd'
       red.player = true
@@ -1017,8 +1014,8 @@ function FightingBalls() {
 
       const blue = makeFighter(cx + arenaR * 0.3, cy, 0, 0, 1, false)
       blue._bossSide = 'blue'
-      blue.maxLives = RESPAWN_LIVES
-      blue.lives = RESPAWN_LIVES
+      blue.maxLives = ENEMY_LIVES
+      blue.lives = ENEMY_LIVES
       blue.bossRespawnsLeft = BOSS_RESPAWNS
       blue.control = 'arrows'
       blue.player = false
@@ -1102,19 +1099,43 @@ function FightingBalls() {
         if (!ball.player && ball.control === 'arrows') {
           redCoins += reward
           redScore += 1
-          if (redScore >= WIN_SCORE && !winner) {
+          ball.lives = 0
+          ball.vx = 0
+          ball.vy = 0
+          ball.eliminated = true
+          ball.respawnAt = now + RESPAWN_COUNTDOWN_MS
+          ball.control = null
+          if (redScore >= WIN_SCORE && !bossMode) {
             winner = 'red'
-            winnerUntil = now + 2500
-            bossReady = true
+            winnerUntil = now + 3000
+            return
           }
+          if (redScore >= BOSS_SCORE && !bossMode && !bossTriggeredThisMatch) {
+            bossTriggeredThisMatch = true
+            startBossFight()
+            return
+          }
+          continue
         } else if (ball.player) {
           blueCoins += reward
           blueScore += 1
-          if (blueScore >= WIN_SCORE && !winner) {
+          ball.lives = 0
+          ball.vx = 0
+          ball.vy = 0
+          ball.eliminated = true
+          ball.respawnAt = now + RESPAWN_COUNTDOWN_MS
+          ball.control = null
+          if (blueScore >= WIN_SCORE && !bossMode) {
             winner = 'blue'
-            winnerUntil = now + 2500
-            bossReady = true
+            winnerUntil = now + 3000
+            return
           }
+          if (blueScore >= BOSS_SCORE && !bossMode && !bossTriggeredThisMatch) {
+            bossTriggeredThisMatch = true
+            startBossFight()
+            return
+          }
+          continue
         }
 
         ball.lives = 0
@@ -1168,8 +1189,14 @@ function FightingBalls() {
       if (winnerUntil > 0) winnerUntil += ms
     }
 
+
+    function shopUnlocked() {
+      return redScore >= SHOP_UNLOCK_SCORE || blueScore >= SHOP_UNLOCK_SCORE
+    }
+
     function openShop() {
-      if (shopOpen || winner) return
+      if (shopOpen || winner || bossMode) return
+      if (!shopUnlocked()) return
       clearKeys()
       shopPausedAt = performance.now()
       shopOpen = true
@@ -1182,6 +1209,217 @@ function FightingBalls() {
         shopPausedAt = 0
       }
       shopOpen = false
+    }
+
+    function drawShopButton() {
+      const w = 120
+      const h = 42
+      const x = width * 0.5 - w * 0.5
+      const y = Math.max(96, cy - arenaR - 58)
+      shopButton = { x, y, w, h }
+      const unlocked = shopUnlocked()
+
+      ctx.save()
+      const grad = ctx.createLinearGradient(x, y, x, y + h)
+      if (unlocked) {
+        grad.addColorStop(0, '#f0c040')
+        grad.addColorStop(1, '#c49220')
+        ctx.strokeStyle = '#ffe9a0'
+        ctx.fillStyle = '#2a1c08'
+      } else {
+        grad.addColorStop(0, '#6b7280')
+        grad.addColorStop(1, '#4b5563')
+        ctx.strokeStyle = '#9ca3af'
+        ctx.fillStyle = '#e5e7eb'
+      }
+      ctx.fillStyle = grad
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, 10)
+      else ctx.rect(x, y, w, h)
+      ctx.fill()
+      ctx.stroke()
+
+      ctx.fillStyle = unlocked ? '#2a1c08' : '#e5e7eb'
+      ctx.font = 'bold 20px Syne, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(unlocked ? 'SHOP' : 'SHOP 🔒', x + w * 0.5, y + h * 0.5)
+      if (!unlocked) {
+        ctx.font = '600 11px Figtree, sans-serif'
+        ctx.fillStyle = 'rgba(255,255,255,0.7)'
+        ctx.fillText(`låses vid ${SHOP_UNLOCK_SCORE} kills`, x + w * 0.5, y + h + 14)
+      }
+      ctx.restore()
+    }
+
+    function drawShop() {
+      shopHits.length = 0
+      if (!shopOpen) return
+
+      const panelW = Math.min(420, width * 0.9)
+      const panelH = Math.min(520, height * 0.82)
+      const px = width * 0.5 - panelW * 0.5
+      const py = height * 0.5 - panelH * 0.5
+
+      ctx.save()
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'
+      ctx.fillRect(0, 0, width, height)
+
+      ctx.fillStyle = '#1a1520'
+      ctx.strokeStyle = '#f0c040'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(px, py, panelW, panelH, 14)
+      else ctx.rect(px, py, panelW, panelH)
+      ctx.fill()
+      ctx.stroke()
+
+      ctx.fillStyle = '#ffe9a0'
+      ctx.font = 'bold 28px Syne, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.fillText('SHOP', width * 0.5, py + 18)
+
+      ctx.font = '14px Figtree, sans-serif'
+      ctx.fillStyle = 'rgba(255,255,255,0.65)'
+      ctx.fillText(`Röd: ${redCoins} 🪙   Blå: ${blueCoins} 🪙`, width * 0.5, py + 54)
+
+      const items = [
+        {
+          id: 'goldStone',
+          title: 'Guldsten',
+          desc: `Z · ${GOLD_STONE_DAMAGE} skada`,
+          cost: GOLD_STONE_COST,
+          side: 'Röd',
+          owned: inventory.goldStone,
+          canBuy: redCoins >= GOLD_STONE_COST,
+        },
+        {
+          id: 'lifeDrinkRed',
+          title: 'Livedryck',
+          desc: `R · +${LIFE_DRINK_HEAL} liv`,
+          cost: LIFE_DRINK_COST,
+          side: 'Röd',
+          owned: inventory.lifeDrinkRed,
+          canBuy: redCoins >= LIFE_DRINK_COST,
+        },
+        {
+          id: 'shield',
+          title: 'Extra sköld',
+          desc: 'E · +1 sköld',
+          cost: 3,
+          side: 'Röd',
+          owned: fighters.find((f) => f.player)?.shieldUses ?? 0,
+          canBuy: redCoins >= 3,
+        },
+        {
+          id: 'goldBomb',
+          title: 'Guldbomb',
+          desc: `0 · ${GOLD_BOMB_DAMAGE} skada 100%`,
+          cost: GOLD_BOMB_COST,
+          side: 'Blå',
+          owned: inventory.goldBomb,
+          canBuy: blueCoins >= GOLD_BOMB_COST,
+        },
+        {
+          id: 'lifeDrinkBlue',
+          title: 'Livedryck',
+          desc: `2 · +${LIFE_DRINK_HEAL} liv`,
+          cost: LIFE_DRINK_COST,
+          side: 'Blå',
+          owned: inventory.lifeDrinkBlue,
+          canBuy: blueCoins >= LIFE_DRINK_COST,
+        },
+        {
+          id: 'bombUse',
+          title: 'Extra bomb',
+          desc: '1 · +1 vanlig bomb',
+          cost: 2,
+          side: 'Blå',
+          owned: fighters.find((f) => f.control === 'arrows')?.bombUses ?? 0,
+          canBuy: blueCoins >= 2,
+        },
+        {
+          id: 'bodyguardRed',
+          title: 'Bodyguard',
+          desc: 'Lila · 1/sek · 6.7s',
+          cost: BODYGUARD_COST,
+          side: 'Röd',
+          owned: bodyguards.filter((g) => g.owner?.player).length,
+          canBuy: redCoins >= BODYGUARD_COST,
+        },
+        {
+          id: 'bodyguardBlue',
+          title: 'Bodyguard',
+          desc: 'Lila · 1/sek · 6.7s',
+          cost: BODYGUARD_COST,
+          side: 'Blå',
+          owned: bodyguards.filter((g) => g.owner && !g.owner.player).length,
+          canBuy: blueCoins >= BODYGUARD_COST,
+        },
+      ]
+
+      const startY = py + 88
+      const rowH = 44
+      items.forEach((item, i) => {
+        const y = startY + i * rowH
+        const bx = px + panelW - 108
+        const by = y + 6
+        const bw = 88
+        const bh = 34
+
+        ctx.textAlign = 'left'
+        ctx.fillStyle = '#ffffff'
+        ctx.font = 'bold 16px Figtree, sans-serif'
+        ctx.fillText(`${item.title} (${item.side})`, px + 24, y + 4)
+        ctx.font = '13px Figtree, sans-serif'
+        ctx.fillStyle = 'rgba(255,255,255,0.55)'
+        ctx.fillText(`${item.desc} · äger ${item.owned}`, px + 24, y + 24)
+
+        ctx.fillStyle = item.canBuy ? '#f0c040' : '#4b5563'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(bx, by, bw, bh, 8)
+        else ctx.rect(bx, by, bw, bh)
+        ctx.fill()
+        ctx.fillStyle = item.canBuy ? '#2a1c08' : '#9ca3af'
+        ctx.font = 'bold 14px Figtree, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(`${item.cost} 🪙`, bx + bw * 0.5, by + bh * 0.5)
+
+        shopHits.push({ x: bx, y: by, w: bw, h: bh, id: item.id })
+      })
+
+      const cxBtn = width * 0.5
+      const cyBtn = py + panelH - 36
+      ctx.fillStyle = '#ffffff'
+      ctx.font = 'bold 22px Syne, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('✕', cxBtn, cyBtn)
+      shopHits.push({ x: cxBtn - 16, y: cyBtn - 4, w: 32, h: 32, id: 'close' })
+      ctx.restore()
+    }
+
+    function drawWinner() {
+      if (!winner) return
+      ctx.save()
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'
+      ctx.fillRect(0, 0, width, height)
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.font = 'bold 64px Syne, sans-serif'
+      ctx.fillStyle = winner === 'red' ? '#ff6b5a' : '#5ec8ff'
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)'
+      ctx.lineWidth = 10
+      const label = winner === 'red' ? 'RÖD VINNER!' : 'BLÅ VINNER!'
+      ctx.strokeText(label, width * 0.5, height * 0.45)
+      ctx.fillText(label, width * 0.5, height * 0.45)
+      ctx.font = '600 20px Figtree, sans-serif'
+      ctx.fillStyle = 'rgba(255,255,255,0.8)'
+      ctx.fillText('Ny match startar snart…', width * 0.5, height * 0.55)
+      ctx.restore()
     }
 
     function drawCoin(x, y, size) {
@@ -1209,6 +1447,7 @@ function FightingBalls() {
     }
 
     function buyShopItem(id) {
+      if (!shopUnlocked()) return
       if (id === 'goldStone') {
         if (redCoins < GOLD_STONE_COST) return
         redCoins -= GOLD_STONE_COST
@@ -1375,190 +1614,6 @@ function FightingBalls() {
       ctx.restore()
     }
 
-    function drawShopButton() {
-      const w = 120
-      const h = 42
-      const x = width * 0.5 - w * 0.5
-      const y = Math.max(96, cy - arenaR - 58)
-      shopButton = { x, y, w, h }
-
-      ctx.save()
-      const grad = ctx.createLinearGradient(x, y, x, y + h)
-      grad.addColorStop(0, '#f0c040')
-      grad.addColorStop(1, '#c49220')
-      ctx.fillStyle = grad
-      ctx.strokeStyle = '#ffe9a0'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, 10)
-      else ctx.rect(x, y, w, h)
-      ctx.fill()
-      ctx.stroke()
-
-      ctx.fillStyle = '#2a1c08'
-      ctx.font = 'bold 20px Syne, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText('SHOP', x + w * 0.5, y + h * 0.5)
-      ctx.restore()
-    }
-
-    function drawShop() {
-      shopHits.length = 0
-      if (!shopOpen) return
-
-      const panelW = Math.min(420, width * 0.9)
-      const panelH = Math.min(520, height * 0.82)
-      const px = width * 0.5 - panelW * 0.5
-      const py = height * 0.5 - panelH * 0.5
-
-      ctx.save()
-      ctx.fillStyle = 'rgba(0,0,0,0.55)'
-      ctx.fillRect(0, 0, width, height)
-
-      ctx.fillStyle = '#1a1520'
-      ctx.strokeStyle = '#f0c040'
-      ctx.lineWidth = 3
-      ctx.beginPath()
-      if (typeof ctx.roundRect === 'function') ctx.roundRect(px, py, panelW, panelH, 14)
-      else ctx.rect(px, py, panelW, panelH)
-      ctx.fill()
-      ctx.stroke()
-
-      ctx.fillStyle = '#ffe9a0'
-      ctx.font = 'bold 28px Syne, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'top'
-      ctx.fillText('SHOP', width * 0.5, py + 18)
-
-      ctx.font = '14px Figtree, sans-serif'
-      ctx.fillStyle = 'rgba(255,255,255,0.65)'
-      ctx.fillText(`Röd: ${redCoins} 🪙   Blå: ${blueCoins} 🪙`, width * 0.5, py + 54)
-
-      const items = [
-        {
-          id: 'goldStone',
-          title: 'Guldsten',
-          desc: `Z · ${GOLD_STONE_DAMAGE} skada`,
-          cost: GOLD_STONE_COST,
-          side: 'Röd',
-          owned: inventory.goldStone,
-          canBuy: redCoins >= GOLD_STONE_COST,
-        },
-        {
-          id: 'lifeDrinkRed',
-          title: 'Livedryck',
-          desc: `R · +${LIFE_DRINK_HEAL} liv`,
-          cost: LIFE_DRINK_COST,
-          side: 'Röd',
-          owned: inventory.lifeDrinkRed,
-          canBuy: redCoins >= LIFE_DRINK_COST,
-        },
-        {
-          id: 'shield',
-          title: 'Extra sköld',
-          desc: 'E · +1 sköld',
-          cost: 3,
-          side: 'Röd',
-          owned: fighters.find((f) => f.player)?.shieldUses ?? 0,
-          canBuy: redCoins >= 3,
-        },
-        {
-          id: 'goldBomb',
-          title: 'Guldbomb',
-          desc: `0 · ${GOLD_BOMB_DAMAGE} skada 100%`,
-          cost: GOLD_BOMB_COST,
-          side: 'Blå',
-          owned: inventory.goldBomb,
-          canBuy: blueCoins >= GOLD_BOMB_COST,
-        },
-        {
-          id: 'lifeDrinkBlue',
-          title: 'Livedryck',
-          desc: `2 · +${LIFE_DRINK_HEAL} liv`,
-          cost: LIFE_DRINK_COST,
-          side: 'Blå',
-          owned: inventory.lifeDrinkBlue,
-          canBuy: blueCoins >= LIFE_DRINK_COST,
-        },
-        {
-          id: 'bombUse',
-          title: 'Extra bomb',
-          desc: '1 · +1 vanlig bomb',
-          cost: 2,
-          side: 'Blå',
-          owned: fighters.find((f) => f.control === 'arrows')?.bombUses ?? 0,
-          canBuy: blueCoins >= 2,
-        },
-        {
-          id: 'bodyguardRed',
-          title: 'Bodyguard',
-          desc: 'Lila · 1/sek · 6.7s',
-          cost: BODYGUARD_COST,
-          side: 'Röd',
-          owned: bodyguards.filter((g) => g.owner?.player).length,
-          canBuy: redCoins >= BODYGUARD_COST,
-        },
-        {
-          id: 'bodyguardBlue',
-          title: 'Bodyguard',
-          desc: 'Lila · 1/sek · 6.7s',
-          cost: BODYGUARD_COST,
-          side: 'Blå',
-          owned: bodyguards.filter((g) => g.owner && !g.owner.player).length,
-          canBuy: blueCoins >= BODYGUARD_COST,
-        },
-      ]
-
-      const startY = py + 88
-      const rowH = 44
-      items.forEach((item, i) => {
-        const y = startY + i * rowH
-        const bx = px + panelW - 108
-        const by = y + 6
-        const bw = 88
-        const bh = 34
-
-        ctx.textAlign = 'left'
-        ctx.fillStyle = '#ffffff'
-        ctx.font = 'bold 16px Figtree, sans-serif'
-        ctx.fillText(`${item.title} (${item.side})`, px + 24, y + 4)
-        ctx.font = '13px Figtree, sans-serif'
-        ctx.fillStyle = 'rgba(255,255,255,0.55)'
-        ctx.fillText(`${item.desc} · äger ${item.owned}`, px + 24, y + 24)
-
-        ctx.fillStyle = item.canBuy ? '#f0c040' : '#4a4450'
-        ctx.beginPath()
-        if (typeof ctx.roundRect === 'function') ctx.roundRect(bx, by, bw, bh, 8)
-        else ctx.rect(bx, by, bw, bh)
-        ctx.fill()
-
-        ctx.fillStyle = item.canBuy ? '#2a1c08' : '#9a96a0'
-        ctx.font = 'bold 14px Figtree, sans-serif'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(`${item.cost} 🪙`, bx + bw * 0.5, by + bh * 0.5)
-
-        shopHits.push({ x: bx, y: by, w: bw, h: bh, id: item.id })
-      })
-
-      // Close button
-      const cxBtn = px + panelW - 44
-      const cyBtn = py + 16
-      ctx.fillStyle = '#ff5a5a'
-      ctx.beginPath()
-      ctx.arc(cxBtn, cyBtn + 12, 14, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = '#fff'
-      ctx.font = 'bold 16px Figtree, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText('✕', cxBtn, cyBtn + 12)
-      shopHits.push({ x: cxBtn - 16, y: cyBtn - 4, w: 32, h: 32, id: 'close' })
-
-      ctx.restore()
-    }
-
     function drawScores() {
       ctx.save()
       ctx.textAlign = 'center'
@@ -1577,83 +1632,7 @@ function FightingBalls() {
 
       ctx.font = 'bold 16px Figtree, sans-serif'
       ctx.fillStyle = 'rgba(255,255,255,0.55)'
-      ctx.fillText(`först till ${WIN_SCORE}`, width * 0.5, 28)
-      ctx.restore()
-    }
-
-    function drawWinner() {
-      if (!winner) return
-      ctx.save()
-      ctx.fillStyle = 'rgba(0,0,0,0.45)'
-      ctx.fillRect(0, 0, width, height)
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.font = 'bold 64px Syne, sans-serif'
-      ctx.fillStyle = winner === 'red' ? '#ff6b5a' : '#5ec8ff'
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)'
-      ctx.lineWidth = 10
-      const label = winner === 'red' ? 'RÖD VINNER!' : 'BLÅ VINNER!'
-      ctx.strokeText(label, width * 0.5, height * 0.32)
-      ctx.fillText(label, width * 0.5, height * 0.32)
-      ctx.font = '600 20px Figtree, sans-serif'
-      ctx.fillStyle = 'rgba(255,255,255,0.8)'
-      ctx.fillText('BOSS = fighta · NEJ = fortsätt (+10 guld)', width * 0.5, height * 0.42)
-      ctx.restore()
-    }
-
-    function drawBossButton() {
-      if (!bossReady || !winner) {
-        bossButton = { x: 0, y: 0, w: 0, h: 0 }
-        skipBossButton = { x: 0, y: 0, w: 0, h: 0 }
-        return
-      }
-      const w = 180
-      const h = 58
-      const gap = 18
-      const bossX = width * 0.5 - w - gap * 0.5
-      const skipX = width * 0.5 + gap * 0.5
-      const y = height * 0.52
-      bossButton = { x: bossX, y, w, h }
-      skipBossButton = { x: skipX, y, w, h }
-
-      ctx.save()
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-
-      // BOSS
-      const bossGrad = ctx.createLinearGradient(bossX, y, bossX, y + h)
-      bossGrad.addColorStop(0, '#ff4d6d')
-      bossGrad.addColorStop(1, '#7c1d3a')
-      ctx.fillStyle = bossGrad
-      ctx.strokeStyle = '#ffb3c1'
-      ctx.lineWidth = 3
-      ctx.beginPath()
-      if (typeof ctx.roundRect === 'function') ctx.roundRect(bossX, y, w, h, 14)
-      else ctx.rect(bossX, y, w, h)
-      ctx.fill()
-      ctx.stroke()
-      ctx.fillStyle = '#fff5f7'
-      ctx.font = 'bold 26px Syne, sans-serif'
-      ctx.fillText('BOSS', bossX + w * 0.5, y + h * 0.5)
-
-      // NEJ
-      const skipGrad = ctx.createLinearGradient(skipX, y, skipX, y + h)
-      skipGrad.addColorStop(0, '#6b7280')
-      skipGrad.addColorStop(1, '#374151')
-      ctx.fillStyle = skipGrad
-      ctx.strokeStyle = '#d1d5db'
-      ctx.lineWidth = 3
-      ctx.beginPath()
-      if (typeof ctx.roundRect === 'function') ctx.roundRect(skipX, y, w, h, 14)
-      else ctx.rect(skipX, y, w, h)
-      ctx.fill()
-      ctx.stroke()
-      ctx.fillStyle = '#f9fafb'
-      ctx.fillText('NEJ', skipX + w * 0.5, y + h * 0.5)
-
-      ctx.font = '600 14px Figtree, sans-serif'
-      ctx.fillStyle = 'rgba(255,233,160,0.9)'
-      ctx.fillText('+10 guld om du skippar', width * 0.5, y + h + 28)
+      ctx.fillText(`först till ${WIN_SCORE} · boss vid ${BOSS_SCORE}`, width * 0.5, 28)
       ctx.restore()
     }
 
@@ -1682,11 +1661,14 @@ function FightingBalls() {
       // Guldpengar behålls mellan matcher
       winner = null
       winnerUntil = 0
-      bossReady = false
       bossMode = false
+      bossTriggeredThisMatch = false
       bossRespawnsLeft = BOSS_RESPAWNS
       bossDamageRed = 0
       bossDamageBlue = 0
+      lastBossKiller = null
+      shopOpen = false
+      shopPausedAt = 0
       stones.length = 0
       bombs.length = 0
       bodyguards.length = 0
@@ -1694,8 +1676,6 @@ function FightingBalls() {
       inventory.lifeDrinkRed = 0
       inventory.lifeDrinkBlue = 0
       inventory.goldBomb = 0
-      shopOpen = false
-      shopPausedAt = 0
       resetFighters()
     }
 
@@ -2075,9 +2055,7 @@ function FightingBalls() {
         spawnCooldown = Math.max(0, spawnCooldown - dt / 60)
 
         if (winner) {
-          // Freeze action — winner can enter boss fight
           last = now
-          bossReady = true
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
           ctx.clearRect(0, 0, width, height)
           drawArena(now)
@@ -2088,11 +2066,10 @@ function FightingBalls() {
           drawShopButton()
           drawGoldCoins()
           drawWinner()
-          drawBossButton()
+          if (now >= winnerUntil) resetMatch()
           return
         }
 
-        // Shop open → pause the round (no physics / abilities tick)
         if (shopOpen) {
           last = now
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -2213,8 +2190,6 @@ function FightingBalls() {
         drawRespawnCountdowns()
         drawBossHud()
         drawShop()
-        drawWinner()
-        drawBossButton()
 
         if (flash > 0.02) {
           ctx.fillStyle = `rgba(255,250,230,${flash * 0.35})`
@@ -2383,15 +2358,6 @@ function FightingBalls() {
     function onPointerDown(e) {
       const { x: px, y: py } = canvasPos(e)
 
-      if (bossReady && winner && hitRect(px, py, bossButton)) {
-        startBossFight()
-        return
-      }
-      if (bossReady && winner && hitRect(px, py, skipBossButton)) {
-        skipBossFight()
-        return
-      }
-
       if (shopOpen) {
         for (let i = shopHits.length - 1; i >= 0; i -= 1) {
           const hit = shopHits[i]
@@ -2400,12 +2366,11 @@ function FightingBalls() {
           else buyShopItem(hit.id)
           return
         }
-        // click outside panel closes
         closeShop()
         return
       }
 
-      if (winner) return
+      if (winner || bossMode) return
 
       if (hitRect(px, py, shopButton)) {
         openShop()
@@ -2415,9 +2380,6 @@ function FightingBalls() {
     function onPointerMove(e) {
       const { x: px, y: py } = canvasPos(e)
       let over = hitRect(px, py, shopButton)
-      if (bossReady && winner && (hitRect(px, py, bossButton) || hitRect(px, py, skipBossButton))) {
-        over = true
-      }
       if (shopOpen) {
         over = shopHits.some((h) => hitRect(px, py, h))
       }
