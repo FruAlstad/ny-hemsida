@@ -52,12 +52,21 @@ const BOMB_RADIUS = 14
 const BOMB_FUSE_MS = 200
 const BOMB_BLAST = 110
 const BOMB_USES_PER_ROUND = 3
+const KNIFE_DAMAGE = 4
+const KNIFE_COOLDOWN = 450
+const KNIFE_SWING_MS = 280
+const KNIFE_REACH = 28
 const RESPAWN_LIVES = 23
 const RESPAWN_LIVES_BLUE = 26
 const RESPAWN_COUNTDOWN_MS = 3000
 const WIN_SCORE = 30
 const BOSS_SCORE = 15
 const SHOP_UNLOCK_SCORE = 5
+const WIN_COIN_REWARD = 999
+const SECRET_CODE = '6767'
+const SECRET_CODE_REWARD = 999
+const SECRET_CODE_BLUE = '7676'
+const SECRET_CODE_BLUE_REWARD = 500
 const BOSS_HP = 167
 const BOSS_DAMAGE = 3
 const BOSS_TOUCH_DAMAGE = 2
@@ -122,6 +131,11 @@ function FightingBalls() {
     let shopPausedAt = 0
     let shopButton = { x: 0, y: 0, w: 120, h: 42 }
     const shopHits = []
+    let codesOpen = false
+    let codesButton = { x: 0, y: 0, w: 120, h: 42 }
+    let codesInput = ''
+    let codesMessage = ''
+    let codesMessageUntil = 0
     const inventory = {
       goldStone: 0,
       lifeDrinkRed: 0,
@@ -168,6 +182,10 @@ function FightingBalls() {
         stoneUses: isPlayer ? STONE_USES : 0,
         bombReadyAt: 0,
         bombUses: !isPlayer && paletteIndex === 1 ? BOMB_USES_PER_ROUND : 0,
+        knifeEquipped: false,
+        knifeReadyAt: 0,
+        knifeSwingUntil: 0,
+        knifeAngle: 0,
         eliminated: false,
         respawnAt: 0,
       }
@@ -781,6 +799,74 @@ function FightingBalls() {
       ball.y += ball.vy * dt
       keepInArena(ball)
       ball.squash *= 0.86
+
+      if (ball.knifeSwingUntil && now >= ball.knifeSwingUntil) {
+        ball.knifeSwingUntil = 0
+        ball.knifeEquipped = false
+      }
+    }
+
+    function swingKnife(attacker) {
+      if (!attacker || attacker.eliminated || attacker.lives <= 0) return
+      if (attacker.control !== 'arrows') return
+      const now = performance.now()
+      if (now < (attacker.knifeReadyAt || 0)) return
+
+      const target = bossMode
+        ? fighters.find((f) => f.isBoss && !f.eliminated)
+        : fighters.find((f) => f !== attacker && !f.eliminated)
+
+      let angle = (attacker.face || 1) > 0 ? 0 : Math.PI
+      if (target) {
+        angle = Math.atan2(target.y - attacker.y, target.x - attacker.x)
+      } else if (attacker.vx !== 0 || attacker.vy !== 0) {
+        angle = Math.atan2(attacker.vy, attacker.vx)
+      }
+
+      attacker.knifeReadyAt = now + KNIFE_COOLDOWN
+      attacker.knifeSwingUntil = now + KNIFE_SWING_MS
+      attacker.knifeEquipped = true
+      attacker.knifeAngle = angle
+      attacker.squash = 0.45
+      attacker.face = Math.cos(angle) >= 0 ? 1 : -1
+
+      if (!target) {
+        spawnBurst(
+          attacker.x + Math.cos(angle) * ballR,
+          attacker.y + Math.sin(angle) * ballR,
+          0.5,
+        )
+        return
+      }
+
+      const dist = Math.hypot(target.x - attacker.x, target.y - attacker.y)
+      const reach = getRadius(attacker) + getRadius(target) + KNIFE_REACH
+      if (dist > reach) {
+        spawnBurst(
+          attacker.x + Math.cos(angle) * ballR * 1.2,
+          attacker.y + Math.sin(angle) * ballR * 1.2,
+          0.55,
+        )
+        return
+      }
+
+      // Träff
+      if (target.isBoss) {
+        target.lives -= KNIFE_DAMAGE
+        addBossDamage(attacker, KNIFE_DAMAGE)
+      } else {
+        const shielded = target.player && now < target.shieldUntil
+        if (!shielded) {
+          target.lives -= KNIFE_DAMAGE
+        }
+      }
+      target.squash = 0.7
+      target.vx += Math.cos(angle) * 10
+      target.vy += Math.sin(angle) * 10
+      spawnBurst(target.x, target.y, 2.2)
+      shake = Math.min(20, shake + 10)
+      flash = Math.min(0.55, flash + 0.25)
+      triggerCheer()
     }
 
     function collidePair(a, b, now) {
@@ -803,36 +889,24 @@ function FightingBalls() {
       b.y += ny * overlap
 
       const canHurt = now >= a.hitUntil && now >= b.hitUntil
-      if (canHurt) {
-        if (a.isBoss || b.isBoss) {
-          const boss = a.isBoss ? a : b
-          const hero = a.isBoss ? b : a
-          const shielded =
-            hero.control === 'wasd' && now < hero.shieldUntil
-          if (!shielded) {
-            hero.lives -= BOSS_DAMAGE
-          }
-          const touchDmg =
-            hero.control === 'wasd' || hero.player
-              ? PLAYER_HIT_DAMAGE
-              : BOSS_TOUCH_DAMAGE
-          boss.lives -= touchDmg
-          addBossDamage(hero, touchDmg)
-          boss.anger = 1
-        } else if (bossMode) {
-          // Lagkamrater skadar inte varandra under bossfight
-        } else {
-          // Touch damage: blue -2, red -2 (shield blocks both ways for red)
-          const player = a.player ? a : b.player ? b : null
-          const enemy = player === a ? b : player === b ? a : null
-          if (player && enemy) {
-            const shielded = now < player.shieldUntil
-            if (!shielded) {
-              enemy.lives -= PLAYER_HIT_DAMAGE
-              player.lives -= ENEMY_HIT_DAMAGE
-            }
-          }
+      const vsBoss = !!(a.isBoss || b.isBoss)
+      const pvpTouch = !vsBoss && !bossMode
+
+      if (canHurt && vsBoss) {
+        const boss = a.isBoss ? a : b
+        const hero = a.isBoss ? b : a
+        const shielded =
+          hero.control === 'wasd' && now < hero.shieldUntil
+        if (!shielded) {
+          hero.lives -= BOSS_DAMAGE
         }
+        const touchDmg =
+          hero.control === 'wasd' || hero.player
+            ? PLAYER_HIT_DAMAGE
+            : BOSS_TOUCH_DAMAGE
+        boss.lives -= touchDmg
+        addBossDamage(hero, touchDmg)
+        boss.anger = 1
         a.hitUntil = now + 500
         b.hitUntil = now + 500
         a.squash = 0.55
@@ -849,7 +923,7 @@ function FightingBalls() {
       if (velAlong > 0) {
         keepInArena(a)
         keepInArena(b)
-        return canHurt
+        return canHurt && vsBoss
       }
 
       const impulse = -1.35 * velAlong
@@ -862,14 +936,16 @@ function FightingBalls() {
       b.vx += nx * 1.5
       b.vy += ny * 1.5
 
-      const power = Math.min(2.5, Math.abs(velAlong) / 4.5)
-      const mx = (a.x + b.x) / 2
-      const my = (a.y + b.y) / 2
-      if (!canHurt) spawnBurst(mx, my, power)
-      a.squash = Math.max(a.squash, 0.55)
-      b.squash = Math.max(b.squash, 0.55)
-      shake = Math.min(16, shake + power * 5)
-      flash = Math.min(0.45, flash + power * 0.18)
+      if (!pvpTouch) {
+        const power = Math.min(2.5, Math.abs(velAlong) / 4.5)
+        const mx = (a.x + b.x) / 2
+        const my = (a.y + b.y) / 2
+        if (!canHurt) spawnBurst(mx, my, power)
+        a.squash = Math.max(a.squash, 0.55)
+        b.squash = Math.max(b.squash, 0.55)
+        shake = Math.min(16, shake + power * 5)
+        flash = Math.min(0.45, flash + power * 0.18)
+      }
       keepInArena(a)
       keepInArena(b)
 
@@ -912,6 +988,9 @@ function FightingBalls() {
       ball.shieldUntil = 0
       ball.stoneReadyAt = 0
       ball.bombReadyAt = 0
+      ball.knifeEquipped = false
+      ball.knifeReadyAt = 0
+      ball.knifeSwingUntil = 0
 
       if (bossMode) {
         if (isRed) {
@@ -1022,6 +1101,7 @@ function FightingBalls() {
       blue.shieldUses = 0
       blue.stoneUses = 0
       blue.bombUses = BOSS_BOMBS
+      blue.knifeEquipped = false
       blue.eliminated = false
 
       const boss = makeFighter(cx, cy - arenaR * 0.2, 0, 0, 5, false)
@@ -1108,6 +1188,7 @@ function FightingBalls() {
           if (redScore >= WIN_SCORE && !bossMode) {
             winner = 'red'
             winnerUntil = now + 3000
+            redCoins += WIN_COIN_REWARD
             return
           }
           if (redScore >= BOSS_SCORE && !bossMode && !bossTriggeredThisMatch) {
@@ -1128,6 +1209,7 @@ function FightingBalls() {
           if (blueScore >= WIN_SCORE && !bossMode) {
             winner = 'blue'
             winnerUntil = now + 3000
+            blueCoins += WIN_COIN_REWARD
             return
           }
           if (blueScore >= BOSS_SCORE && !bossMode && !bossTriggeredThisMatch) {
@@ -1195,7 +1277,7 @@ function FightingBalls() {
     }
 
     function openShop() {
-      if (shopOpen || winner || bossMode) return
+      if (shopOpen || codesOpen || winner || bossMode) return
       if (!shopUnlocked()) return
       clearKeys()
       shopPausedAt = performance.now()
@@ -1214,42 +1296,165 @@ function FightingBalls() {
     function drawShopButton() {
       const w = 120
       const h = 42
-      const x = width * 0.5 - w * 0.5
+      const gap = 12
+      const shopX = width * 0.5 - w - gap * 0.5
+      const codesX = width * 0.5 + gap * 0.5
       const y = Math.max(96, cy - arenaR - 58)
-      shopButton = { x, y, w, h }
+      shopButton = { x: shopX, y, w, h }
+      codesButton = { x: codesX, y, w, h }
       const unlocked = shopUnlocked()
 
       ctx.save()
-      const grad = ctx.createLinearGradient(x, y, x, y + h)
+      // SHOP
+      const grad = ctx.createLinearGradient(shopX, y, shopX, y + h)
       if (unlocked) {
         grad.addColorStop(0, '#f0c040')
         grad.addColorStop(1, '#c49220')
         ctx.strokeStyle = '#ffe9a0'
-        ctx.fillStyle = '#2a1c08'
       } else {
         grad.addColorStop(0, '#6b7280')
         grad.addColorStop(1, '#4b5563')
         ctx.strokeStyle = '#9ca3af'
-        ctx.fillStyle = '#e5e7eb'
       }
       ctx.fillStyle = grad
       ctx.lineWidth = 2
       ctx.beginPath()
-      if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, 10)
-      else ctx.rect(x, y, w, h)
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(shopX, y, w, h, 10)
+      else ctx.rect(shopX, y, w, h)
       ctx.fill()
       ctx.stroke()
-
       ctx.fillStyle = unlocked ? '#2a1c08' : '#e5e7eb'
       ctx.font = 'bold 20px Syne, sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(unlocked ? 'SHOP' : 'SHOP 🔒', x + w * 0.5, y + h * 0.5)
+      ctx.fillText(unlocked ? 'SHOP' : 'SHOP 🔒', shopX + w * 0.5, y + h * 0.5)
+
+      // CODES
+      const cGrad = ctx.createLinearGradient(codesX, y, codesX, y + h)
+      cGrad.addColorStop(0, '#a78bfa')
+      cGrad.addColorStop(1, '#6d28d9')
+      ctx.fillStyle = cGrad
+      ctx.strokeStyle = '#ddd6fe'
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(codesX, y, w, h, 10)
+      else ctx.rect(codesX, y, w, h)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = '#f5f3ff'
+      ctx.fillText('CODES', codesX + w * 0.5, y + h * 0.5)
+
       if (!unlocked) {
         ctx.font = '600 11px Figtree, sans-serif'
         ctx.fillStyle = 'rgba(255,255,255,0.7)'
-        ctx.fillText(`låses vid ${SHOP_UNLOCK_SCORE} kills`, x + w * 0.5, y + h + 14)
+        ctx.fillText(`shop låses vid ${SHOP_UNLOCK_SCORE} kills`, width * 0.5, y + h + 14)
       }
+      ctx.restore()
+    }
+
+    function openCodes() {
+      if (codesOpen || shopOpen || winner || bossMode) return
+      clearKeys()
+      shopPausedAt = performance.now()
+      codesOpen = true
+      codesInput = ''
+      codesMessage = ''
+      codesMessageUntil = 0
+    }
+
+    function closeCodes() {
+      if (!codesOpen) return
+      if (shopPausedAt > 0 && !shopOpen) {
+        shiftPausedTimers(performance.now() - shopPausedAt)
+        shopPausedAt = 0
+      }
+      codesOpen = false
+      codesInput = ''
+      codesMessage = ''
+    }
+
+    function submitCode() {
+      if (codesInput === SECRET_CODE) {
+        redCoins += SECRET_CODE_REWARD
+        codesMessage = `Röd fick +${SECRET_CODE_REWARD} guld!`
+        codesMessageUntil = performance.now() + 2500
+        codesInput = ''
+        spawnBurst(cx, cy, 1.5)
+        triggerCheer()
+      } else if (codesInput === SECRET_CODE_BLUE) {
+        blueCoins += SECRET_CODE_BLUE_REWARD
+        codesMessage = `Blå fick +${SECRET_CODE_BLUE_REWARD} guld!`
+        codesMessageUntil = performance.now() + 2500
+        codesInput = ''
+        spawnBurst(cx, cy, 1.5)
+        triggerCheer()
+      } else {
+        codesMessage = 'Fel kod'
+        codesMessageUntil = performance.now() + 1500
+        codesInput = ''
+      }
+    }
+
+    function drawCodes() {
+      if (!codesOpen) return
+      const panelW = Math.min(360, width * 0.88)
+      const panelH = 240
+      const px = width * 0.5 - panelW * 0.5
+      const py = height * 0.5 - panelH * 0.5
+      const now = performance.now()
+
+      ctx.save()
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'
+      ctx.fillRect(0, 0, width, height)
+
+      ctx.fillStyle = '#1a1520'
+      ctx.strokeStyle = '#a78bfa'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(px, py, panelW, panelH, 14)
+      else ctx.rect(px, py, panelW, panelH)
+      ctx.fill()
+      ctx.stroke()
+
+      ctx.fillStyle = '#ddd6fe'
+      ctx.font = 'bold 28px Syne, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.fillText('CODES', width * 0.5, py + 20)
+
+      ctx.font = '14px Figtree, sans-serif'
+      ctx.fillStyle = 'rgba(255,255,255,0.6)'
+      ctx.fillText('Skriv kod · Enter = OK · Esc = stäng', width * 0.5, py + 58)
+
+      // Input box
+      const ix = px + 36
+      const iy = py + 100
+      const iw = panelW - 72
+      const ih = 48
+      ctx.fillStyle = '#0f0b14'
+      ctx.strokeStyle = '#c4b5fd'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(ix, iy, iw, ih, 10)
+      else ctx.rect(ix, iy, iw, ih)
+      ctx.fill()
+      ctx.stroke()
+
+      ctx.fillStyle = '#ffffff'
+      ctx.font = 'bold 28px Syne, sans-serif'
+      ctx.textBaseline = 'middle'
+      const display = codesInput.length ? codesInput : '····'
+      ctx.fillStyle = codesInput.length ? '#ffffff' : 'rgba(255,255,255,0.25)'
+      ctx.fillText(display, width * 0.5, iy + ih * 0.5)
+
+      if (codesMessage && now < codesMessageUntil) {
+        ctx.fillStyle = codesMessage.startsWith('+') ? '#86efac' : '#fca5a5'
+        ctx.font = '600 16px Figtree, sans-serif'
+        ctx.fillText(codesMessage, width * 0.5, iy + ih + 36)
+      }
+
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'
+      ctx.font = 'bold 22px Syne, sans-serif'
+      ctx.fillText('✕', width * 0.5, py + panelH - 28)
       ctx.restore()
     }
 
@@ -1305,15 +1510,6 @@ function FightingBalls() {
           canBuy: redCoins >= LIFE_DRINK_COST,
         },
         {
-          id: 'shield',
-          title: 'Extra sköld',
-          desc: 'E · +1 sköld',
-          cost: 3,
-          side: 'Röd',
-          owned: fighters.find((f) => f.player)?.shieldUses ?? 0,
-          canBuy: redCoins >= 3,
-        },
-        {
           id: 'goldBomb',
           title: 'Guldbomb',
           desc: `0 · ${GOLD_BOMB_DAMAGE} skada 100%`,
@@ -1325,20 +1521,11 @@ function FightingBalls() {
         {
           id: 'lifeDrinkBlue',
           title: 'Livedryck',
-          desc: `2 · +${LIFE_DRINK_HEAL} liv`,
+          desc: `3 · +${LIFE_DRINK_HEAL} liv`,
           cost: LIFE_DRINK_COST,
           side: 'Blå',
           owned: inventory.lifeDrinkBlue,
           canBuy: blueCoins >= LIFE_DRINK_COST,
-        },
-        {
-          id: 'bombUse',
-          title: 'Extra bomb',
-          desc: '1 · +1 vanlig bomb',
-          cost: 2,
-          side: 'Blå',
-          owned: fighters.find((f) => f.control === 'arrows')?.bombUses ?? 0,
-          canBuy: blueCoins >= 2,
         },
         {
           id: 'bodyguardRed',
@@ -1464,17 +1651,6 @@ function FightingBalls() {
         if (blueCoins < GOLD_BOMB_COST) return
         blueCoins -= GOLD_BOMB_COST
         inventory.goldBomb += 1
-      } else if (id === 'shield') {
-        const red = fighters.find((f) => f.player)
-        if (!red || redCoins < 3) return
-        redCoins -= 3
-        red.shieldUses = Math.min(SHIELD_USES_PER_ROUND, (red.shieldUses || 0) + 1)
-      } else if (id === 'bombUse') {
-        const blue = fighters.find((f) => f.control === 'arrows')
-        if (!blue || blueCoins < 2) return
-        blueCoins -= 2
-        const maxBombs = bossMode ? BOSS_BOMBS : BOMB_USES_PER_ROUND
-        blue.bombUses = Math.min(maxBombs, (blue.bombUses || 0) + 1)
       } else if (id === 'bodyguardRed') {
         if (redCoins < BODYGUARD_COST) return
         const red = fighters.find((f) => f.player && !f.eliminated)
@@ -1681,22 +1857,31 @@ function FightingBalls() {
 
     function drawGoldCoins() {
       const size = 18
-      const gap = 26
-      const cols = 8
 
-      // Red coins — top left
-      for (let i = 0; i < redCoins; i += 1) {
-        const col = i % cols
-        const row = Math.floor(i / cols)
-        drawCoin(28 + col * gap, 28 + row * gap + 70, size)
-      }
+      // Compact: one coin + number (so 999 doesn't fill the screen)
+      drawCoin(28, 98, size)
+      ctx.save()
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'middle'
+      ctx.font = 'bold 18px Figtree, sans-serif'
+      ctx.fillStyle = '#ffe9a0'
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)'
+      ctx.lineWidth = 3
+      ctx.strokeText(`×${redCoins}`, 48, 98)
+      ctx.fillText(`×${redCoins}`, 48, 98)
+      ctx.restore()
 
-      // Blue coins — top right
-      for (let i = 0; i < blueCoins; i += 1) {
-        const col = i % cols
-        const row = Math.floor(i / cols)
-        drawCoin(width - 28 - col * gap, 28 + row * gap + 70, size)
-      }
+      drawCoin(width - 28, 98, size)
+      ctx.save()
+      ctx.textAlign = 'right'
+      ctx.textBaseline = 'middle'
+      ctx.font = 'bold 18px Figtree, sans-serif'
+      ctx.fillStyle = '#ffe9a0'
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)'
+      ctx.lineWidth = 3
+      ctx.strokeText(`×${blueCoins}`, width - 48, 98)
+      ctx.fillText(`×${blueCoins}`, width - 48, 98)
+      ctx.restore()
     }
 
     function updateSpectators(dt, now) {
@@ -1949,6 +2134,44 @@ function FightingBalls() {
       }
       ctx.stroke()
 
+      // Kniv-sving (blå trycker 2)
+      if (ball.knifeEquipped || (ball.knifeSwingUntil && performance.now() < ball.knifeSwingUntil)) {
+        const now = performance.now()
+        const swingLeft = Math.max(0, (ball.knifeSwingUntil || 0) - now)
+        const swingT = 1 - swingLeft / KNIFE_SWING_MS
+        const swingArc = Math.sin(swingT * Math.PI) * 1.1
+        const dir = (ball.knifeAngle || 0) + swingArc - 0.55
+        ctx.save()
+        ctx.rotate(dir)
+        ctx.translate(r * 0.9, r * 0.05)
+        const blade = ctx.createLinearGradient(0, 0, r * 1.05, 0)
+        blade.addColorStop(0, '#c0c8d0')
+        blade.addColorStop(0.5, '#f4f7fa')
+        blade.addColorStop(1, '#8a939c')
+        ctx.fillStyle = blade
+        ctx.beginPath()
+        ctx.moveTo(r * 1.05, 0)
+        ctx.lineTo(r * 0.15, -r * 0.14)
+        ctx.lineTo(-r * 0.05, -r * 0.09)
+        ctx.lineTo(-r * 0.05, r * 0.09)
+        ctx.lineTo(r * 0.15, r * 0.14)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = '#3d2314'
+        ctx.fillRect(-r * 0.38, -r * 0.08, r * 0.34, r * 0.16)
+        ctx.fillStyle = '#c9a227'
+        ctx.fillRect(-r * 0.1, -r * 0.16, r * 0.07, r * 0.32)
+        // Slash trail
+        if (swingT > 0.05 && swingT < 0.95) {
+          ctx.strokeStyle = `rgba(220,240,255,${0.55 * Math.sin(swingT * Math.PI)})`
+          ctx.lineWidth = 3
+          ctx.beginPath()
+          ctx.arc(0, 0, r * 1.15, -0.9, 0.4)
+          ctx.stroke()
+        }
+        ctx.restore()
+      }
+
       ctx.restore()
 
       // Life pips above fighters
@@ -2070,7 +2293,7 @@ function FightingBalls() {
           return
         }
 
-        if (shopOpen) {
+        if (shopOpen || codesOpen) {
           last = now
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
           ctx.clearRect(0, 0, width, height)
@@ -2096,6 +2319,7 @@ function FightingBalls() {
           drawRespawnCountdowns(shopPausedAt || now)
           drawBossHud()
           drawShop()
+          drawCodes()
           return
         }
 
@@ -2190,6 +2414,7 @@ function FightingBalls() {
         drawRespawnCountdowns()
         drawBossHud()
         drawShop()
+        drawCodes()
 
         if (flash > 0.02) {
           ctx.fillStyle = `rgba(255,250,230,${flash * 0.35})`
@@ -2232,6 +2457,23 @@ function FightingBalls() {
       const k = e.key.toLowerCase()
       if (k === 'escape') {
         closeShop()
+        closeCodes()
+        return
+      }
+      if (codesOpen) {
+        e.preventDefault()
+        if (e.key === 'Enter') {
+          submitCode()
+          return
+        }
+        if (e.key === 'Backspace') {
+          codesInput = codesInput.slice(0, -1)
+          return
+        }
+        if (/^[0-9]$/.test(e.key) && codesInput.length < 8) {
+          codesInput += e.key
+          if (codesInput.length === SECRET_CODE.length) submitCode()
+        }
         return
       }
       if (shopOpen) return
@@ -2302,6 +2544,12 @@ function FightingBalls() {
       if ((k === '2' || e.code === 'Digit2' || e.code === 'Numpad2') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
+        if (blue) swingKnife(blue)
+        return
+      }
+      if ((k === '3' || e.code === 'Digit3' || e.code === 'Numpad3') && !e.repeat) {
+        e.preventDefault()
+        const blue = fighters.find((f) => f.control === 'arrows')
         if (blue) useLifeDrink(blue, 'blue')
         return
       }
@@ -2358,6 +2606,11 @@ function FightingBalls() {
     function onPointerDown(e) {
       const { x: px, y: py } = canvasPos(e)
 
+      if (codesOpen) {
+        closeCodes()
+        return
+      }
+
       if (shopOpen) {
         for (let i = shopHits.length - 1; i >= 0; i -= 1) {
           const hit = shopHits[i]
@@ -2374,15 +2627,20 @@ function FightingBalls() {
 
       if (hitRect(px, py, shopButton)) {
         openShop()
+        return
+      }
+      if (hitRect(px, py, codesButton)) {
+        openCodes()
       }
     }
 
     function onPointerMove(e) {
       const { x: px, y: py } = canvasPos(e)
-      let over = hitRect(px, py, shopButton)
+      let over = hitRect(px, py, shopButton) || hitRect(px, py, codesButton)
       if (shopOpen) {
         over = shopHits.some((h) => hitRect(px, py, h))
       }
+      if (codesOpen) over = true
       canvas.style.cursor = over ? 'pointer' : 'default'
     }
 
