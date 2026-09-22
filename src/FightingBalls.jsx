@@ -8,17 +8,27 @@ const PLAYER_HIT_DAMAGE = 3
 const ENEMY_HIT_DAMAGE = 2
 const SHIELD_DURATION = 2500
 const SHIELD_USES_PER_ROUND = 3
-const STONE_SPEED = 14
-const STONE_DAMAGE = 1
-const STONE_COOLDOWN = 400
-const STONE_RADIUS = 10
-const STONE_USES = 30
-const LIFE_DRINK_COST = 3
-const LIFE_DRINK_HEAL = 5
 const KNIFE_DAMAGE = 4
 const KNIFE_COOLDOWN = 450
 const KNIFE_SWING_MS = 280
 const KNIFE_REACH = 28
+const GLOVES_COST = 10
+const GLOVES_DAMAGE = 5
+const GLOVES_COOLDOWN = 320
+const GLOVES_SWING_MS = 220
+const GLOVES_REACH = 22
+const SWORD_COST = 25
+const SWORD_DAMAGE = 8
+const SWORD_COOLDOWN = 520
+const SWORD_SWING_MS = 360
+const SWORD_REACH = 52
+const PISTOL_COST = 50
+const PISTOL_DAMAGE = 4
+const PISTOL_COOLDOWN = 550
+const PISTOL_SPEED = 17
+const PISTOL_RADIUS = 7
+const PISTOL_CHARGE_MS = 780
+const PISTOL_SPREAD = 0.32 // max vinkelfel — siktar men träffar inte alltid
 const SPEAR_DAMAGE = 3
 const SPEAR_COOLDOWN = 500
 const SPEAR_SWING_MS = 420
@@ -26,11 +36,9 @@ const SPEAR_SWING_MS = 420
 const SPEAR_BASE = 3.2
 const SPEAR_THRUST = 0.55
 const SPEAR_WIDTH = 52
-const GOLD_BOMB_COST = 4
 const GOLD_BOMB_DAMAGE = 5
 const GOLD_BOMB_COOLDOWN = 700
 const GOLD_BOMB_FUSE_MS = 800
-const BODYGUARD_COST = 5
 const BODYGUARD_DURATION_MS = 6700
 const BODYGUARD_DAMAGE = 1
 const BODYGUARD_TICK_MS = 1000
@@ -38,14 +46,9 @@ const BODYGUARD_SPEED = 11
 const BODYGUARD_RADIUS = 18
 
 function rollKillCoins() {
-  const r = Math.random()
-  // 1%: 10, 9%: 3, 30%: 5, 30%: 2, remaining 30%: 0
-  // User: 30% chance for 5 gold; keep other rarities smaller
-  if (r < 0.01) return 10
-  if (r < 0.1) return 3
-  if (r < 0.4) return 5
-  if (r < 0.7) return 2
-  return 0
+  // Varje kill: 1 coin, 1% chans på 25
+  if (Math.random() < 0.01) return 25
+  return 1
 }
 const BOMB_SPEED = 18
 const BOMB_DAMAGE = 5
@@ -107,8 +110,8 @@ function FightingBalls() {
 
     const particles = []
     const shocks = []
-    const stones = []
     const bombs = []
+    const bullets = []
     const bodyguards = []
     let shake = 0
     let flash = 0
@@ -140,9 +143,8 @@ function FightingBalls() {
     let codeUsesLeft = SECRET_CODE_MAX_USES
     let shopFree = false
     const inventory = {
-      lifeDrinkRed: 0,
-      lifeDrinkBlue: 0,
-      goldBomb: 0,
+      weaponRed: 'knife',
+      weaponBlue: 'knife',
     }
 
     const fighters = []
@@ -180,14 +182,13 @@ function FightingBalls() {
         control: isPlayer ? 'wasd' : paletteIndex === 1 ? 'arrows' : null,
         shieldUntil: 0,
         shieldUses: isPlayer ? SHIELD_USES_PER_ROUND : 0,
-        stoneReadyAt: 0,
-        stoneUses: isPlayer ? STONE_USES : 0,
         bombReadyAt: 0,
         bombUses: !isPlayer && paletteIndex === 1 ? BOMB_USES_PER_ROUND : 0,
         knifeEquipped: false,
         knifeReadyAt: 0,
         knifeSwingUntil: 0,
         knifeAngle: 0,
+        pistolChargeStart: 0,
         spearEquipped: false,
         spearReadyAt: 0,
         spearSwingUntil: 0,
@@ -200,8 +201,8 @@ function FightingBalls() {
 
     function resetFighters() {
       fighters.length = 0
-      stones.length = 0
       bombs.length = 0
+      bullets.length = 0
       bodyguards.length = 0
       fighters.push(
         makeFighter(cx - arenaR * 0.25, cy, 0, 0, 0, true),
@@ -247,7 +248,7 @@ function FightingBalls() {
 
       cx = width * 0.5
       cy = height * 0.5
-      arenaR = Math.min(width, height) * 0.48
+      arenaR = Math.min(width, height) * 0.62
       ballR = Math.max(36, Math.min(64, arenaR * 0.16))
       spectatorR = Math.max(12, Math.min(22, arenaR * 0.055))
       resetFighters()
@@ -303,171 +304,6 @@ function FightingBalls() {
       })
     }
 
-    function throwStone(thrower) {
-      if (!thrower || thrower.eliminated || thrower.lives <= 0) return
-      const now = performance.now()
-      if (now < thrower.stoneReadyAt) return
-      if ((thrower.stoneUses || 0) <= 0) return
-      thrower.stoneUses -= 1
-
-      const target = bossMode
-        ? fighters.find((f) => f.isBoss && !f.eliminated)
-        : fighters.find((f) => f !== thrower && !f.eliminated)
-      let dx = target ? target.x - thrower.x : thrower.vx
-      let dy = target ? target.y - thrower.y : thrower.vy
-      let dist = Math.hypot(dx, dy)
-      if (dist < 0.01) {
-        dx = thrower.face || 1
-        dy = 0
-        dist = 1
-      }
-      const nx = dx / dist
-      const ny = dy / dist
-
-      stones.push({
-        x: thrower.x + nx * (ballR + STONE_RADIUS),
-        y: thrower.y + ny * (ballR + STONE_RADIUS),
-        vx: nx * STONE_SPEED + thrower.vx * 0.3,
-        vy: ny * STONE_SPEED + thrower.vy * 0.3,
-        r: STONE_RADIUS,
-        life: 2.5,
-        owner: thrower,
-        spin: Math.atan2(ny, nx),
-        damage: STONE_DAMAGE,
-        gold: false,
-        sword: false,
-        angle: Math.atan2(ny, nx),
-      })
-      thrower.stoneReadyAt = now + STONE_COOLDOWN
-      thrower.squash = 0.25
-    }
-
-    function updateStones(dt, now) {
-      for (let i = stones.length - 1; i >= 0; i -= 1) {
-        const stone = stones[i]
-        stone.x += stone.vx * dt
-        stone.y += stone.vy * dt
-        if (stone.sword) {
-          stone.angle = Math.atan2(stone.vy, stone.vx)
-          stone.spin = stone.angle
-        } else {
-          stone.spin += 0.35 * dt
-        }
-        stone.life -= dt * 0.02
-
-        // Stay roughly in arena or despawn
-        const dx = stone.x - cx
-        const dy = stone.y - cy
-        if (Math.hypot(dx, dy) > arenaR + 40 || stone.life <= 0) {
-          stones.splice(i, 1)
-          continue
-        }
-
-        // Hit opponents
-        let hit = false
-        for (let j = 0; j < fighters.length; j += 1) {
-          const f = fighters[j]
-          if (f === stone.owner || f.eliminated) continue
-          const d = Math.hypot(f.x - stone.x, f.y - stone.y)
-          if (d < getRadius(f) + stone.r) {
-            // I boss-läge: stenar träffar bara bossen (inte lagkamraten)
-            if (bossMode && !f.isBoss) continue
-            const dmg = stone.damage || STONE_DAMAGE
-            f.lives -= dmg
-            if (f.isBoss) addBossDamage(stone.owner, dmg)
-            f.squash = 0.5
-            f.vx += stone.vx * 0.25
-            f.vy += stone.vy * 0.25
-            spawnBurst(stone.x, stone.y, stone.gold ? 2 : 1)
-            shake = Math.min(14, shake + (stone.gold ? 8 : 4))
-            hit = true
-            break
-          }
-        }
-        if (hit) stones.splice(i, 1)
-      }
-    }
-
-    function drawStone(stone) {
-      ctx.save()
-      ctx.translate(stone.x, stone.y)
-      ctx.rotate(stone.spin)
-
-      if (stone.sword) {
-        // Blade
-        const len = 28
-        const grad = ctx.createLinearGradient(-len, 0, len, 0)
-        grad.addColorStop(0, '#9aa3ad')
-        grad.addColorStop(0.45, '#f2f5f8')
-        grad.addColorStop(1, '#c0c8d0')
-        ctx.fillStyle = grad
-        ctx.beginPath()
-        ctx.moveTo(len, 0)
-        ctx.lineTo(len * 0.15, -5)
-        ctx.lineTo(-len * 0.35, -3.5)
-        ctx.lineTo(-len * 0.35, 3.5)
-        ctx.lineTo(len * 0.15, 5)
-        ctx.closePath()
-        ctx.fill()
-        // Guard
-        ctx.fillStyle = '#d4a017'
-        ctx.fillRect(-len * 0.38, -9, 6, 18)
-        // Handle
-        ctx.fillStyle = '#6b3f1f'
-        ctx.fillRect(-len * 0.72, -3, len * 0.35, 6)
-        // Pommel
-        ctx.beginPath()
-        ctx.arc(-len * 0.75, 0, 4, 0, Math.PI * 2)
-        ctx.fillStyle = '#e0b43a'
-        ctx.fill()
-        // Shine
-        ctx.strokeStyle = 'rgba(255,255,255,0.55)'
-        ctx.lineWidth = 1.5
-        ctx.beginPath()
-        ctx.moveTo(len * 0.85, -1.5)
-        ctx.lineTo(-len * 0.2, -1.5)
-        ctx.stroke()
-      } else if (stone.gold) {
-        const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, stone.r * 2)
-        glow.addColorStop(0, 'rgba(255, 220, 100, 0.55)')
-        glow.addColorStop(1, 'transparent')
-        ctx.fillStyle = glow
-        ctx.beginPath()
-        ctx.arc(0, 0, stone.r * 2, 0, Math.PI * 2)
-        ctx.fill()
-
-        const body = ctx.createRadialGradient(-4, -4, 2, 0, 0, stone.r)
-        body.addColorStop(0, '#fff3b0')
-        body.addColorStop(0.45, '#f0c040')
-        body.addColorStop(1, '#b8860b')
-        ctx.fillStyle = body
-        ctx.beginPath()
-        ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.strokeStyle = '#ffe9a0'
-        ctx.lineWidth = 2
-        ctx.beginPath()
-        ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
-        ctx.stroke()
-      } else {
-        ctx.fillStyle = '#6b5b4a'
-        ctx.beginPath()
-        ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.fillStyle = '#8a7a66'
-        ctx.beginPath()
-        ctx.ellipse(-stone.r * 0.25, -stone.r * 0.25, stone.r * 0.45, stone.r * 0.35, 0, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.strokeStyle = '#3d342c'
-        ctx.lineWidth = 2
-        ctx.beginPath()
-        ctx.ellipse(0, 0, stone.r, stone.r * 0.85, 0, 0, Math.PI * 2)
-        ctx.stroke()
-      }
-
-      ctx.restore()
-    }
-
     function throwBomb(thrower, options = {}) {
       if (!thrower || thrower.eliminated || thrower.lives <= 0) return
       const now = performance.now()
@@ -475,8 +311,7 @@ function FightingBalls() {
 
       if (now < thrower.bombReadyAt) return
       if (isGold) {
-        if (inventory.goldBomb <= 0) return
-        inventory.goldBomb -= 1
+        return
       } else if ((thrower.bombUses || 0) <= 0) {
         return
       }
@@ -788,6 +623,25 @@ function FightingBalls() {
         ball.knifeSwingUntil = 0
         ball.knifeEquipped = false
       }
+      // Pistol siktar alltid mot motståndarbollen
+      if (
+        !ball.eliminated &&
+        !ball.isBoss &&
+        getSideWeapon(ball) === 'pistol'
+      ) {
+        ball.knifeAngle = aimPistolAngle(ball)
+        ball.face = Math.cos(ball.knifeAngle) >= 0 ? 1 : -1
+        ball.meleeKind = 'pistol'
+      }
+      if (ball.pistolChargeStart) {
+        if (ball.eliminated || getSideWeapon(ball) !== 'pistol') {
+          ball.pistolChargeStart = 0
+        } else {
+          const t = pistolChargeT(ball, now)
+          ball.squash = Math.max(ball.squash, 0.12 + t * 0.22)
+          if (t >= 1) shootPistol(ball)
+        }
+      }
       if (ball.spearSwingUntil && now >= ball.spearSwingUntil) {
         ball.spearSwingUntil = 0
         ball.spearEquipped = false
@@ -900,11 +754,182 @@ function FightingBalls() {
       }
     }
 
-    function swingKnife(attacker) {
+    function getSideWeapon(attacker) {
+      if (!attacker) return 'knife'
+      if (attacker.player || attacker.control === 'wasd' || attacker._bossSide === 'red') {
+        return inventory.weaponRed || 'knife'
+      }
+      return inventory.weaponBlue || 'knife'
+    }
+
+    function meleeStats(kind) {
+      if (kind === 'gloves') {
+        return {
+          damage: GLOVES_DAMAGE,
+          cooldown: GLOVES_COOLDOWN,
+          swingMs: GLOVES_SWING_MS,
+          reach: GLOVES_REACH,
+        }
+      }
+      if (kind === 'sword') {
+        return {
+          damage: SWORD_DAMAGE,
+          cooldown: SWORD_COOLDOWN,
+          swingMs: SWORD_SWING_MS,
+          reach: SWORD_REACH,
+        }
+      }
+      return {
+        damage: KNIFE_DAMAGE,
+        cooldown: KNIFE_COOLDOWN,
+        swingMs: KNIFE_SWING_MS,
+        reach: KNIFE_REACH,
+      }
+    }
+
+    function useAttack(attacker) {
       if (!attacker || attacker.eliminated || attacker.lives <= 0) return
-      if (attacker.control !== 'arrows') return
+      if (attacker.control !== 'arrows' && attacker.control !== 'wasd') return
+      const weapon = getSideWeapon(attacker)
+      if (weapon === 'pistol') {
+        beginPistolCharge(attacker)
+        return
+      }
+      swingMelee(attacker, weapon)
+    }
+
+    function pistolChargeT(attacker, now = performance.now()) {
+      if (!attacker?.pistolChargeStart) return 0
+      return Math.min(1, (now - attacker.pistolChargeStart) / PISTOL_CHARGE_MS)
+    }
+
+    function aimPistolAngle(attacker) {
+      const target = bossMode
+        ? fighters.find((f) => f.isBoss && !f.eliminated)
+        : fighters.find((f) => f !== attacker && !f.eliminated)
+      let angle = (attacker.face || 1) > 0 ? 0 : Math.PI
+      if (target) {
+        angle = Math.atan2(target.y - attacker.y, target.x - attacker.x)
+      } else if (attacker.vx !== 0 || attacker.vy !== 0) {
+        angle = Math.atan2(attacker.vy, attacker.vx)
+      }
+      return angle
+    }
+
+    function beginPistolCharge(attacker) {
       const now = performance.now()
       if (now < (attacker.knifeReadyAt || 0)) return
+      if (attacker.pistolChargeStart) return
+      attacker.pistolChargeStart = now
+      attacker.meleeKind = 'pistol'
+      attacker.knifeAngle = aimPistolAngle(attacker)
+      attacker.face = Math.cos(attacker.knifeAngle) >= 0 ? 1 : -1
+    }
+
+    function cancelPistolCharge(attacker) {
+      if (!attacker) return
+      attacker.pistolChargeStart = 0
+    }
+
+    function shootPistol(attacker) {
+      const now = performance.now()
+      if (now < (attacker.knifeReadyAt || 0)) return
+
+      const aim = aimPistolAngle(attacker)
+      const charge = Math.max(pistolChargeT(attacker, now), 0.85)
+      // Siktar på bollen men med spridning — inte 100% träff
+      const spreadScale = 1.2 - charge * 0.45
+      const spread = (Math.random() - 0.5) * 2 * PISTOL_SPREAD * spreadScale
+      const angle = aim + spread
+      const nx = Math.cos(angle)
+      const ny = Math.sin(angle)
+      bullets.push({
+        x: attacker.x + nx * (getRadius(attacker) + PISTOL_RADIUS),
+        y: attacker.y + ny * (getRadius(attacker) + PISTOL_RADIUS),
+        vx: nx * PISTOL_SPEED * (0.85 + 0.25 * charge) + attacker.vx * 0.2,
+        vy: ny * PISTOL_SPEED * (0.85 + 0.25 * charge) + attacker.vy * 0.2,
+        r: PISTOL_RADIUS,
+        life: 2.2,
+        owner: attacker,
+        damage: PISTOL_DAMAGE,
+      })
+      attacker.pistolChargeStart = 0
+      attacker.knifeReadyAt = now + PISTOL_COOLDOWN
+      attacker.knifeEquipped = true
+      attacker.knifeSwingUntil = now + 200
+      attacker.meleeKind = 'pistol'
+      attacker.knifeAngle = aim // pipan pekar kvar mot målet visuellt
+      attacker.squash = 0.4
+      attacker.face = Math.cos(aim) >= 0 ? 1 : -1
+      spawnBurst(
+        attacker.x + Math.cos(aim) * getRadius(attacker),
+        attacker.y + Math.sin(aim) * getRadius(attacker),
+        0.7,
+      )
+      shake = Math.min(12, shake + 4)
+      flash = Math.min(0.35, flash + 0.12)
+    }
+
+    function updateBullets(dt) {
+      for (let i = bullets.length - 1; i >= 0; i -= 1) {
+        const b = bullets[i]
+        b.x += b.vx * dt
+        b.y += b.vy * dt
+        b.life -= dt * 0.02
+        const dx = b.x - cx
+        const dy = b.y - cy
+        if (Math.hypot(dx, dy) > arenaR + 40 || b.life <= 0) {
+          bullets.splice(i, 1)
+          continue
+        }
+        let hit = false
+        for (let j = 0; j < fighters.length; j += 1) {
+          const f = fighters[j]
+          if (f === b.owner || f.eliminated) continue
+          if (bossMode && !f.isBoss) continue
+          const d = Math.hypot(f.x - b.x, f.y - b.y)
+          if (d < getRadius(f) + b.r) {
+            const shielded = f.player && performance.now() < f.shieldUntil
+            if (!shielded) {
+              f.lives -= b.damage
+              if (f.isBoss) addBossDamage(b.owner, b.damage)
+            }
+            f.squash = 0.55
+            f.vx += b.vx * 0.2
+            f.vy += b.vy * 0.2
+            spawnBurst(b.x, b.y, 1.2)
+            shake = Math.min(14, shake + 5)
+            hit = true
+            break
+          }
+        }
+        if (hit) bullets.splice(i, 1)
+      }
+    }
+
+    function drawBullet(b) {
+      ctx.save()
+      ctx.translate(b.x, b.y)
+      const glow = ctx.createRadialGradient(0, 0, 1, 0, 0, b.r * 2.2)
+      glow.addColorStop(0, 'rgba(255,220,120,0.7)')
+      glow.addColorStop(1, 'transparent')
+      ctx.fillStyle = glow
+      ctx.beginPath()
+      ctx.arc(0, 0, b.r * 2.2, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#f5d76e'
+      ctx.beginPath()
+      ctx.arc(0, 0, b.r, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+
+    function swingMelee(attacker, kind = 'knife') {
+      if (!attacker || attacker.eliminated || attacker.lives <= 0) return
+      if (attacker.control !== 'arrows' && attacker.control !== 'wasd') return
+      const now = performance.now()
+      if (now < (attacker.knifeReadyAt || 0)) return
+      const stats = meleeStats(kind)
 
       const target = bossMode
         ? fighters.find((f) => f.isBoss && !f.eliminated)
@@ -917,9 +942,10 @@ function FightingBalls() {
         angle = Math.atan2(attacker.vy, attacker.vx)
       }
 
-      attacker.knifeReadyAt = now + KNIFE_COOLDOWN
-      attacker.knifeSwingUntil = now + KNIFE_SWING_MS
+      attacker.knifeReadyAt = now + stats.cooldown
+      attacker.knifeSwingUntil = now + stats.swingMs
       attacker.knifeEquipped = true
+      attacker.meleeKind = kind
       attacker.knifeAngle = angle
       attacker.squash = 0.45
       attacker.face = Math.cos(angle) >= 0 ? 1 : -1
@@ -934,7 +960,7 @@ function FightingBalls() {
       }
 
       const dist = Math.hypot(target.x - attacker.x, target.y - attacker.y)
-      const reach = getRadius(attacker) + getRadius(target) + KNIFE_REACH
+      const reach = getRadius(attacker) + getRadius(target) + stats.reach
       if (dist > reach) {
         spawnBurst(
           attacker.x + Math.cos(angle) * ballR * 1.2,
@@ -944,23 +970,26 @@ function FightingBalls() {
         return
       }
 
-      // Träff
       if (target.isBoss) {
-        target.lives -= KNIFE_DAMAGE
-        addBossDamage(attacker, KNIFE_DAMAGE)
+        target.lives -= stats.damage
+        addBossDamage(attacker, stats.damage)
       } else {
         const shielded = target.player && now < target.shieldUntil
         if (!shielded) {
-          target.lives -= KNIFE_DAMAGE
+          target.lives -= stats.damage
         }
       }
       target.squash = 0.7
-      target.vx += Math.cos(angle) * 10
-      target.vy += Math.sin(angle) * 10
-      spawnBurst(target.x, target.y, 2.2)
-      shake = Math.min(20, shake + 10)
+      target.vx += Math.cos(angle) * (kind === 'sword' ? 12 : 10)
+      target.vy += Math.sin(angle) * (kind === 'sword' ? 12 : 10)
+      spawnBurst(target.x, target.y, kind === 'sword' ? 2.6 : 2.2)
+      shake = Math.min(20, shake + (kind === 'sword' ? 12 : 10))
       flash = Math.min(0.55, flash + 0.25)
       triggerCheer()
+    }
+
+    function swingKnife(attacker) {
+      useAttack(attacker)
     }
 
     function swingSpear(attacker) {
@@ -1114,11 +1143,11 @@ function FightingBalls() {
       ball.respawnAt = 0
       ball.hitUntil = now + 1000
       ball.shieldUntil = 0
-      ball.stoneReadyAt = 0
       ball.bombReadyAt = 0
       ball.knifeEquipped = false
       ball.knifeReadyAt = 0
       ball.knifeSwingUntil = 0
+      ball.pistolChargeStart = 0
       ball.spearEquipped = false
       ball.spearReadyAt = 0
       ball.spearSwingUntil = 0
@@ -1129,7 +1158,6 @@ function FightingBalls() {
           ball.player = true
           ball._bossSide = 'red'
           ball.shieldUses = SHIELD_USES_PER_ROUND
-          ball.stoneUses = STONE_USES
           ball.bombUses = 0
           ball.x = cx - arenaR * 0.3
         } else {
@@ -1137,7 +1165,6 @@ function FightingBalls() {
           ball.player = false
           ball._bossSide = 'blue'
           ball.shieldUses = 0
-          ball.stoneUses = 0
           ball.x = cx + arenaR * 0.3
         }
         ball.y = cy
@@ -1149,13 +1176,11 @@ function FightingBalls() {
       if (ball.player) {
         ball.control = 'wasd'
         ball.shieldUses = SHIELD_USES_PER_ROUND
-        ball.stoneUses = STONE_USES
         ball.bombUses = 0
         ball.x = cx - arenaR * 0.25
       } else {
         ball.control = 'arrows'
         ball.shieldUses = 0
-        ball.stoneUses = 0
         ball.bombUses = BOMB_USES_PER_ROUND
         ball.x = cx + arenaR * 0.25
       }
@@ -1188,8 +1213,8 @@ function FightingBalls() {
       lastBossKiller = null
       shopOpen = false
       shopPausedAt = 0
-      stones.length = 0
       bombs.length = 0
+      bullets.length = 0
       bodyguards.length = 0
       clearKeys()
       // Behåll poäng/guld — fortsätt mot 30
@@ -1204,8 +1229,8 @@ function FightingBalls() {
       bossDamageRed = 0
       bossDamageBlue = 0
       lastBossKiller = null
-      stones.length = 0
       bombs.length = 0
+      bullets.length = 0
       bodyguards.length = 0
       fighters.length = 0
       clearKeys()
@@ -1218,7 +1243,6 @@ function FightingBalls() {
       red.control = 'wasd'
       red.player = true
       red.shieldUses = SHIELD_USES_PER_ROUND
-      red.stoneUses = STONE_USES
       red.bombUses = 0
       red.eliminated = false
 
@@ -1230,7 +1254,6 @@ function FightingBalls() {
       blue.control = 'arrows'
       blue.player = false
       blue.shieldUses = 0
-      blue.stoneUses = 0
       blue.bombUses = BOSS_BOMBS
       blue.knifeEquipped = false
       blue.eliminated = false
@@ -1370,7 +1393,9 @@ function FightingBalls() {
         if (f.shieldUntil > 0) f.shieldUntil += ms
         if (f.hitUntil > 0) f.hitUntil += ms
         if (f.coolUntil > 0) f.coolUntil += ms
-        if (f.stoneReadyAt > 0) f.stoneReadyAt += ms
+        if (f.knifeReadyAt > 0) f.knifeReadyAt += ms
+        if (f.knifeSwingUntil > 0) f.knifeSwingUntil += ms
+        if (f.pistolChargeStart > 0) f.pistolChargeStart += ms
       }
       for (let i = 0; i < bombs.length; i += 1) {
         if (bombs[i].fuseUntil > 0) bombs[i].fuseUntil += ms
@@ -1625,8 +1650,8 @@ function FightingBalls() {
       shopHits.length = 0
       if (!shopOpen) return
 
-      const panelW = Math.min(420, width * 0.9)
-      const panelH = Math.min(520, height * 0.82)
+      const panelW = Math.min(440, width * 0.92)
+      const panelH = Math.min(560, height * 0.88)
       const px = width * 0.5 - panelW * 0.5
       const py = height * 0.5 - panelH * 0.5
 
@@ -1661,49 +1686,58 @@ function FightingBalls() {
 
       const items = [
         {
-          id: 'lifeDrinkRed',
-          title: 'Livedryck',
-          desc: `R · +${LIFE_DRINK_HEAL} liv`,
-          cost: shopPrice(LIFE_DRINK_COST),
+          id: 'glovesRed',
+          title: 'Boxningshänder',
+          desc: `R · Q · ${GLOVES_DAMAGE} dmg`,
+          cost: shopPrice(GLOVES_COST),
           side: 'Röd',
-          owned: inventory.lifeDrinkRed,
-          canBuy: redCoins >= shopPrice(LIFE_DRINK_COST),
+          owned: inventory.weaponRed === 'gloves' ? 1 : 0,
+          canBuy: redCoins >= shopPrice(GLOVES_COST),
         },
         {
-          id: 'goldBomb',
-          title: 'Guldbomb',
-          desc: `0 · ${GOLD_BOMB_DAMAGE} skada 100%`,
-          cost: shopPrice(GOLD_BOMB_COST),
+          id: 'glovesBlue',
+          title: 'Boxningshänder',
+          desc: `B · 2 · ${GLOVES_DAMAGE} dmg`,
+          cost: shopPrice(GLOVES_COST),
           side: 'Blå',
-          owned: inventory.goldBomb,
-          canBuy: blueCoins >= shopPrice(GOLD_BOMB_COST),
+          owned: inventory.weaponBlue === 'gloves' ? 1 : 0,
+          canBuy: blueCoins >= shopPrice(GLOVES_COST),
         },
         {
-          id: 'lifeDrinkBlue',
-          title: 'Livedryck',
-          desc: `3 · +${LIFE_DRINK_HEAL} liv`,
-          cost: shopPrice(LIFE_DRINK_COST),
-          side: 'Blå',
-          owned: inventory.lifeDrinkBlue,
-          canBuy: blueCoins >= shopPrice(LIFE_DRINK_COST),
-        },
-        {
-          id: 'bodyguardRed',
-          title: 'Bodyguard',
-          desc: 'Lila · 1/sek · 6.7s',
-          cost: shopPrice(BODYGUARD_COST),
+          id: 'swordRed',
+          title: 'Stort svärd',
+          desc: `R · Q · ${SWORD_DAMAGE} dmg · lång range`,
+          cost: shopPrice(SWORD_COST),
           side: 'Röd',
-          owned: bodyguards.filter((g) => g.owner?.player).length,
-          canBuy: redCoins >= shopPrice(BODYGUARD_COST),
+          owned: inventory.weaponRed === 'sword' ? 1 : 0,
+          canBuy: redCoins >= shopPrice(SWORD_COST),
         },
         {
-          id: 'bodyguardBlue',
-          title: 'Bodyguard',
-          desc: 'Lila · 1/sek · 6.7s',
-          cost: shopPrice(BODYGUARD_COST),
+          id: 'swordBlue',
+          title: 'Stort svärd',
+          desc: `B · 2 · ${SWORD_DAMAGE} dmg · lång range`,
+          cost: shopPrice(SWORD_COST),
           side: 'Blå',
-          owned: bodyguards.filter((g) => g.owner && !g.owner.player).length,
-          canBuy: blueCoins >= shopPrice(BODYGUARD_COST),
+          owned: inventory.weaponBlue === 'sword' ? 1 : 0,
+          canBuy: blueCoins >= shopPrice(SWORD_COST),
+        },
+        {
+          id: 'pistolRed',
+          title: 'Pistol',
+          desc: `R · håll Q · ladda · ${PISTOL_DAMAGE} dmg`,
+          cost: shopPrice(PISTOL_COST),
+          side: 'Röd',
+          owned: inventory.weaponRed === 'pistol' ? 1 : 0,
+          canBuy: redCoins >= shopPrice(PISTOL_COST),
+        },
+        {
+          id: 'pistolBlue',
+          title: 'Pistol',
+          desc: `B · håll 2 · ladda · ${PISTOL_DAMAGE} dmg`,
+          cost: shopPrice(PISTOL_COST),
+          side: 'Blå',
+          owned: inventory.weaponBlue === 'pistol' ? 1 : 0,
+          canBuy: blueCoins >= shopPrice(PISTOL_COST),
         },
       ]
 
@@ -1795,41 +1829,25 @@ function FightingBalls() {
 
     function buyShopItem(id) {
       if (!shopOpen) return
-      if (id === 'lifeDrinkRed') {
-        const cost = shopPrice(LIFE_DRINK_COST)
-        if (redCoins < cost) return
-        redCoins -= cost
-        inventory.lifeDrinkRed += 1
-      } else if (id === 'lifeDrinkBlue') {
-        const cost = shopPrice(LIFE_DRINK_COST)
-        if (blueCoins < cost) return
-        blueCoins -= cost
-        inventory.lifeDrinkBlue += 1
-      } else if (id === 'goldBomb') {
-        const cost = shopPrice(GOLD_BOMB_COST)
-        if (blueCoins < cost) return
-        blueCoins -= cost
-        inventory.goldBomb += 1
-      } else if (id === 'bodyguardRed') {
-        const cost = shopPrice(BODYGUARD_COST)
-        if (redCoins < cost) return
-        const red = fighters.find((f) => f.player && !f.eliminated)
-        const target = bossMode
-          ? fighters.find((f) => f.isBoss && !f.eliminated)
-          : fighters.find((f) => f.control === 'arrows' && !f.eliminated)
-        if (!red || !target) return
-        redCoins -= cost
-        spawnBodyguard(red, target)
-      } else if (id === 'bodyguardBlue') {
-        const cost = shopPrice(BODYGUARD_COST)
-        if (blueCoins < cost) return
-        const blue = fighters.find((f) => f.control === 'arrows' && !f.eliminated)
-        const target = bossMode
-          ? fighters.find((f) => f.isBoss && !f.eliminated)
-          : fighters.find((f) => f.player && !f.eliminated)
-        if (!blue || !target) return
-        blueCoins -= cost
-        spawnBodyguard(blue, target)
+      const map = {
+        glovesRed: { side: 'red', weapon: 'gloves', cost: GLOVES_COST },
+        glovesBlue: { side: 'blue', weapon: 'gloves', cost: GLOVES_COST },
+        swordRed: { side: 'red', weapon: 'sword', cost: SWORD_COST },
+        swordBlue: { side: 'blue', weapon: 'sword', cost: SWORD_COST },
+        pistolRed: { side: 'red', weapon: 'pistol', cost: PISTOL_COST },
+        pistolBlue: { side: 'blue', weapon: 'pistol', cost: PISTOL_COST },
+      }
+      const item = map[id]
+      if (!item) return
+      const price = shopPrice(item.cost)
+      if (item.side === 'red') {
+        if (redCoins < price) return
+        redCoins -= price
+        inventory.weaponRed = item.weapon
+      } else {
+        if (blueCoins < price) return
+        blueCoins -= price
+        inventory.weaponBlue = item.weapon
       }
     }
 
@@ -2008,12 +2026,11 @@ function FightingBalls() {
       shopPausedAt = 0
       pendingBossAfterShop = false
       pendingWinAfterShop = null
-      stones.length = 0
       bombs.length = 0
+      bullets.length = 0
       bodyguards.length = 0
-      inventory.lifeDrinkRed = 0
-      inventory.lifeDrinkBlue = 0
-      inventory.goldBomb = 0
+      inventory.weaponRed = 'knife'
+      inventory.weaponBlue = 'knife'
       resetFighters()
     }
 
@@ -2296,42 +2313,164 @@ function FightingBalls() {
       }
       ctx.stroke()
 
-      // Kniv-sving (blå trycker 2)
-      if (ball.knifeEquipped || (ball.knifeSwingUntil && performance.now() < ball.knifeSwingUntil)) {
+      // Shop-vapen syns alltid i händerna; kniv bara under sving
+      {
+        const weapon = happy || ball.isBoss ? null : getSideWeapon(ball)
         const now = performance.now()
-        const swingLeft = Math.max(0, (ball.knifeSwingUntil || 0) - now)
-        const swingT = 1 - swingLeft / KNIFE_SWING_MS
-        const swingArc = Math.sin(swingT * Math.PI) * 1.1
-        const dir = (ball.knifeAngle || 0) + swingArc - 0.55
-        ctx.save()
-        ctx.rotate(dir)
-        ctx.translate(r * 0.9, r * 0.05)
-        const blade = ctx.createLinearGradient(0, 0, r * 1.05, 0)
-        blade.addColorStop(0, '#c0c8d0')
-        blade.addColorStop(0.5, '#f4f7fa')
-        blade.addColorStop(1, '#8a939c')
-        ctx.fillStyle = blade
-        ctx.beginPath()
-        ctx.moveTo(r * 1.05, 0)
-        ctx.lineTo(r * 0.15, -r * 0.14)
-        ctx.lineTo(-r * 0.05, -r * 0.09)
-        ctx.lineTo(-r * 0.05, r * 0.09)
-        ctx.lineTo(r * 0.15, r * 0.14)
-        ctx.closePath()
-        ctx.fill()
-        ctx.fillStyle = '#3d2314'
-        ctx.fillRect(-r * 0.38, -r * 0.08, r * 0.34, r * 0.16)
-        ctx.fillStyle = '#c9a227'
-        ctx.fillRect(-r * 0.1, -r * 0.16, r * 0.07, r * 0.32)
-        // Slash trail
-        if (swingT > 0.05 && swingT < 0.95) {
-          ctx.strokeStyle = `rgba(220,240,255,${0.55 * Math.sin(swingT * Math.PI)})`
-          ctx.lineWidth = 3
-          ctx.beginPath()
-          ctx.arc(0, 0, r * 1.15, -0.9, 0.4)
-          ctx.stroke()
+        const swinging =
+          !!(ball.knifeEquipped || (ball.knifeSwingUntil && now < ball.knifeSwingUntil))
+        const kind = swinging ? ball.meleeKind || weapon || 'knife' : weapon
+        const showHeld =
+          kind === 'gloves' || kind === 'sword' || kind === 'pistol' || (swinging && kind === 'knife')
+
+        if (showHeld && kind) {
+          const swingMs =
+            kind === 'sword'
+              ? SWORD_SWING_MS
+              : kind === 'gloves'
+                ? GLOVES_SWING_MS
+                : KNIFE_SWING_MS
+          const swingLeft = swinging ? Math.max(0, (ball.knifeSwingUntil || 0) - now) : swingMs
+          const swingT = swinging ? 1 - swingLeft / swingMs : 0
+          const faceAngle =
+            kind === 'pistol' && typeof ball.knifeAngle === 'number'
+              ? ball.knifeAngle
+              : typeof ball.knifeAngle === 'number' && (swinging || ball.pistolChargeStart)
+                ? ball.knifeAngle
+                : (ball.face || 1) > 0
+                  ? 0
+                  : Math.PI
+          const swingArc = swinging
+            ? Math.sin(swingT * Math.PI) * (kind === 'sword' ? 0.85 : kind === 'pistol' ? 0.15 : 1.1)
+            : 0
+          const dir = faceAngle + swingArc - (swinging && kind !== 'pistol' ? 0.55 : 0)
+
+          ctx.save()
+          ctx.rotate(dir)
+
+          if (kind === 'pistol') {
+            const charge = pistolChargeT(ball, now)
+            ctx.translate(r * 0.85, r * 0.15)
+            // Laddningsaura
+            if (charge > 0) {
+              const pulse = 0.55 + Math.sin(now * 0.04) * 0.2
+              const aura = ctx.createRadialGradient(r * 0.5, 0, 2, r * 0.5, 0, r * (1.1 + charge))
+              aura.addColorStop(0, `rgba(255, 230, 120, ${0.55 * charge * pulse})`)
+              aura.addColorStop(0.5, `rgba(255, 140, 40, ${0.35 * charge})`)
+              aura.addColorStop(1, 'transparent')
+              ctx.fillStyle = aura
+              ctx.beginPath()
+              ctx.arc(r * 0.55, 0, r * (1.2 + charge * 0.6), 0, Math.PI * 2)
+              ctx.fill()
+              // Snurrande laddningsring
+              ctx.strokeStyle = `rgba(255, 220, 100, ${0.4 + charge * 0.55})`
+              ctx.lineWidth = 2.5 + charge * 2
+              ctx.beginPath()
+              ctx.arc(
+                r * 0.45,
+                0,
+                r * (0.75 + charge * 0.35),
+                now * 0.012,
+                now * 0.012 + Math.PI * 1.4 * charge + 0.4,
+              )
+              ctx.stroke()
+              ctx.strokeStyle = `rgba(255, 255, 255, ${0.25 + charge * 0.5})`
+              ctx.lineWidth = 1.5
+              ctx.beginPath()
+              ctx.arc(
+                r * 0.45,
+                0,
+                r * (0.55 + charge * 0.25),
+                -now * 0.018,
+                -now * 0.018 + Math.PI * charge,
+              )
+              ctx.stroke()
+            }
+            ctx.fillStyle = '#2a2a2a'
+            ctx.fillRect(-r * 0.08, 0, r * 0.22, r * 0.42)
+            ctx.fillStyle = charge > 0.7 ? '#6b7280' : '#4b5563'
+            ctx.fillRect(0, -r * 0.12, r * 0.85, r * 0.28)
+            ctx.fillStyle = '#1f2937'
+            ctx.fillRect(r * 0.75, -r * 0.06, r * 0.45, r * 0.14)
+            ctx.fillStyle = charge > 0.85 ? '#ffe08a' : '#9ca3af'
+            ctx.fillRect(r * 0.2, -r * 0.18, r * 0.12, r * 0.08)
+            // Pip-glöd när laddad
+            if (charge > 0.15) {
+              ctx.fillStyle = `rgba(255, 200, 80, ${0.35 + charge * 0.55})`
+              ctx.beginPath()
+              ctx.arc(r * 1.15, 0, r * (0.08 + charge * 0.14), 0, Math.PI * 2)
+              ctx.fill()
+            }
+            if (swinging && swingT < 0.35) {
+              ctx.fillStyle = `rgba(255,220,120,${0.7 * (1 - swingT / 0.35)})`
+              ctx.beginPath()
+              ctx.arc(r * 1.3, 0, r * 0.22, 0, Math.PI * 2)
+              ctx.fill()
+            }
+          } else if (kind === 'gloves') {
+            ctx.translate(r * 0.95, 0)
+            ctx.fillStyle = '#8b1a1a'
+            ctx.beginPath()
+            ctx.ellipse(r * 0.35, -r * 0.22, r * 0.28, r * 0.22, 0, 0, Math.PI * 2)
+            ctx.ellipse(r * 0.35, r * 0.22, r * 0.28, r * 0.22, 0, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.fillStyle = '#f5f5f5'
+            ctx.beginPath()
+            ctx.ellipse(r * 0.42, -r * 0.22, r * 0.12, r * 0.1, 0, 0, Math.PI * 2)
+            ctx.ellipse(r * 0.42, r * 0.22, r * 0.12, r * 0.1, 0, 0, Math.PI * 2)
+            ctx.fill()
+          } else if (kind === 'sword') {
+            ctx.translate(r * 0.55, r * 0.05)
+            const idleTilt = swinging ? 0 : -0.35
+            ctx.rotate(idleTilt)
+            const len = r * 2.05
+            const blade = ctx.createLinearGradient(0, 0, len, 0)
+            blade.addColorStop(0, '#9aa3ad')
+            blade.addColorStop(0.5, '#f2f5f8')
+            blade.addColorStop(1, '#6b7280')
+            ctx.fillStyle = blade
+            ctx.beginPath()
+            ctx.moveTo(len, 0)
+            ctx.lineTo(len * 0.2, -r * 0.16)
+            ctx.lineTo(-r * 0.1, -r * 0.1)
+            ctx.lineTo(-r * 0.1, r * 0.1)
+            ctx.lineTo(len * 0.2, r * 0.16)
+            ctx.closePath()
+            ctx.fill()
+            ctx.fillStyle = '#c9a227'
+            ctx.fillRect(-r * 0.18, -r * 0.22, r * 0.12, r * 0.44)
+            ctx.fillStyle = '#4a2c14'
+            ctx.fillRect(-r * 0.55, -r * 0.08, r * 0.4, r * 0.16)
+          } else {
+            ctx.translate(r * 0.9, r * 0.05)
+            const blade = ctx.createLinearGradient(0, 0, r * 1.05, 0)
+            blade.addColorStop(0, '#c0c8d0')
+            blade.addColorStop(0.5, '#f4f7fa')
+            blade.addColorStop(1, '#8a939c')
+            ctx.fillStyle = blade
+            ctx.beginPath()
+            ctx.moveTo(r * 1.05, 0)
+            ctx.lineTo(r * 0.15, -r * 0.14)
+            ctx.lineTo(-r * 0.05, -r * 0.09)
+            ctx.lineTo(-r * 0.05, r * 0.09)
+            ctx.lineTo(r * 0.15, r * 0.14)
+            ctx.closePath()
+            ctx.fill()
+            ctx.fillStyle = '#3d2314'
+            ctx.fillRect(-r * 0.38, -r * 0.08, r * 0.34, r * 0.16)
+            ctx.fillStyle = '#c9a227'
+            ctx.fillRect(-r * 0.1, -r * 0.16, r * 0.07, r * 0.32)
+          }
+
+          if (swinging && kind !== 'pistol' && swingT > 0.05 && swingT < 0.95) {
+            ctx.strokeStyle = `rgba(220,240,255,${0.55 * Math.sin(swingT * Math.PI)})`
+            ctx.lineWidth = kind === 'sword' ? 4 : 3
+            ctx.beginPath()
+            ctx.arc(0, 0, r * (kind === 'sword' ? 1.6 : 1.15), -0.9, 0.4)
+            ctx.stroke()
+          }
+          ctx.restore()
         }
-        ctx.restore()
       }
 
       // Spjut-stöt (röd trycker Z) — tip-längd = spearTipLength (samma som hitbox)
@@ -2423,15 +2562,6 @@ function FightingBalls() {
             }
           }
 
-          // Stone count (Q)
-          const stonesLeft = Math.max(0, ball.stoneUses || 0)
-          ctx.save()
-          ctx.textAlign = 'center'
-          ctx.textBaseline = 'middle'
-          ctx.font = `bold ${Math.max(11, Math.floor(r * 0.22))}px Figtree, sans-serif`
-          ctx.fillStyle = '#d4d4d8'
-          ctx.fillText(`sten ${stonesLeft}`, ball.x, sY - pipR * 3.2)
-          ctx.restore()
         }
 
         // Remaining bomb uses for blue
@@ -2496,11 +2626,11 @@ function FightingBalls() {
           for (let i = 0; i < fighters.length; i += 1) {
             drawBall(fighters[i], getRadius(fighters[i]), false)
           }
-          for (let i = 0; i < stones.length; i += 1) {
-            drawStone(stones[i])
-          }
           for (let i = 0; i < bombs.length; i += 1) {
             drawBomb(bombs[i])
+          }
+          for (let i = 0; i < bullets.length; i += 1) {
+            drawBullet(bullets[i])
           }
           for (let i = 0; i < bodyguards.length; i += 1) {
             drawBodyguard(bodyguards[i])
@@ -2525,8 +2655,8 @@ function FightingBalls() {
           }
         }
 
-        updateStones(dt, now)
         updateBombs(dt)
+        updateBullets(dt)
         updateBodyguards(dt, now)
         removeDeadFighters()
         updateSpectators(dt, now)
@@ -2585,12 +2715,13 @@ function FightingBalls() {
           drawBall(fighters[i], getRadius(fighters[i]), false)
         }
 
-        for (let i = 0; i < stones.length; i += 1) {
-          drawStone(stones[i])
-        }
 
         for (let i = 0; i < bombs.length; i += 1) {
           drawBomb(bombs[i])
+        }
+
+        for (let i = 0; i < bullets.length; i += 1) {
+          drawBullet(bullets[i])
         }
 
         for (let i = 0; i < bodyguards.length; i += 1) {
@@ -2620,18 +2751,8 @@ function FightingBalls() {
     resize()
     window.addEventListener('resize', resize)
 
-    function useLifeDrink(fighter, side) {
-      if (!fighter || fighter.eliminated || fighter.lives <= 0) return
-      if (side === 'red') {
-        if (inventory.lifeDrinkRed <= 0) return
-        inventory.lifeDrinkRed -= 1
-      } else {
-        if (inventory.lifeDrinkBlue <= 0) return
-        inventory.lifeDrinkBlue -= 1
-      }
-      fighter.lives += LIFE_DRINK_HEAL
-      fighter.squash = 0.35
-      spawnBurst(fighter.x, fighter.y, 1.1)
+    function useLifeDrink() {
+      // Livedryck borttagen från shoppen
     }
 
     function clearKeys() {
@@ -2712,13 +2833,7 @@ function FightingBalls() {
       if (k === 'q' && !e.repeat) {
         e.preventDefault()
         const player = fighters.find((f) => f.player)
-        if (player) throwStone(player)
-        return
-      }
-      if (k === 'z' && !e.repeat) {
-        e.preventDefault()
-        const player = fighters.find((f) => f.player)
-        if (player) swingSpear(player)
+        if (player) swingKnife(player)
         return
       }
       if (k === 'r' && !e.repeat) {
@@ -2777,6 +2892,15 @@ function FightingBalls() {
       if (e.key === 'ArrowRight') {
         keys.right = false
         e.preventDefault()
+      }
+      if (k === 'q') {
+        const player = fighters.find((f) => f.player)
+        if (player && getSideWeapon(player) === 'pistol') cancelPistolCharge(player)
+        return
+      }
+      if (k === '2' || e.code === 'Digit2' || e.code === 'Numpad2') {
+        const blue = fighters.find((f) => f.control === 'arrows')
+        if (blue && getSideWeapon(blue) === 'pistol') cancelPistolCharge(blue)
       }
     }
 
