@@ -23,12 +23,15 @@ const SWORD_COOLDOWN = 520
 const SWORD_SWING_MS = 360
 const SWORD_REACH = 52
 const PISTOL_COST = 50
+const PISTOL_UPGRADE_COST = 40
 const PISTOL_DAMAGE = 4
+const AK_DAMAGE = 6
 const PISTOL_COOLDOWN = 550
 const PISTOL_SPEED = 17
 const PISTOL_RADIUS = 7
 const PISTOL_CHARGE_MS = 780
 const PISTOL_SPREAD = 0.32 // max vinkelfel — siktar men träffar inte alltid
+const PISTOL_FAST_MUL = 2.5 // AK-47: lite snabbare laddning + eldhastighet
 const SPEAR_DAMAGE = 3
 const SPEAR_COOLDOWN = 500
 const SPEAR_SWING_MS = 420
@@ -145,6 +148,8 @@ function FightingBalls() {
     const inventory = {
       weaponRed: 'knife',
       weaponBlue: 'knife',
+      pistolUpRed: false,
+      pistolUpBlue: false,
     }
 
     const fighters = []
@@ -762,6 +767,22 @@ function FightingBalls() {
       return inventory.weaponBlue || 'knife'
     }
 
+    function hasPistolUpgrade(attacker) {
+      if (!attacker) return false
+      if (attacker.player || attacker.control === 'wasd' || attacker._bossSide === 'red') {
+        return !!inventory.pistolUpRed
+      }
+      return !!inventory.pistolUpBlue
+    }
+
+    function pistolChargeMsFor(attacker) {
+      return hasPistolUpgrade(attacker) ? PISTOL_CHARGE_MS / PISTOL_FAST_MUL : PISTOL_CHARGE_MS
+    }
+
+    function pistolCooldownFor(attacker) {
+      return hasPistolUpgrade(attacker) ? PISTOL_COOLDOWN / PISTOL_FAST_MUL : PISTOL_COOLDOWN
+    }
+
     function meleeStats(kind) {
       if (kind === 'gloves') {
         return {
@@ -800,7 +821,7 @@ function FightingBalls() {
 
     function pistolChargeT(attacker, now = performance.now()) {
       if (!attacker?.pistolChargeStart) return 0
-      return Math.min(1, (now - attacker.pistolChargeStart) / PISTOL_CHARGE_MS)
+      return Math.min(1, (now - attacker.pistolChargeStart) / pistolChargeMsFor(attacker))
     }
 
     function aimPistolAngle(attacker) {
@@ -851,12 +872,12 @@ function FightingBalls() {
         r: PISTOL_RADIUS,
         life: 2.2,
         owner: attacker,
-        damage: PISTOL_DAMAGE,
+        damage: hasPistolUpgrade(attacker) ? AK_DAMAGE : PISTOL_DAMAGE,
       })
       attacker.pistolChargeStart = 0
-      attacker.knifeReadyAt = now + PISTOL_COOLDOWN
+      attacker.knifeReadyAt = now + pistolCooldownFor(attacker)
       attacker.knifeEquipped = true
-      attacker.knifeSwingUntil = now + 200
+      attacker.knifeSwingUntil = now + (hasPistolUpgrade(attacker) ? 120 : 200)
       attacker.meleeKind = 'pistol'
       attacker.knifeAngle = aim // pipan pekar kvar mot målet visuellt
       attacker.squash = 0.4
@@ -1651,7 +1672,7 @@ function FightingBalls() {
       if (!shopOpen) return
 
       const panelW = Math.min(440, width * 0.92)
-      const panelH = Math.min(560, height * 0.88)
+      const panelH = Math.min(640, height * 0.9)
       const px = width * 0.5 - panelW * 0.5
       const py = height * 0.5 - panelH * 0.5
 
@@ -1738,6 +1759,30 @@ function FightingBalls() {
           side: 'Blå',
           owned: inventory.weaponBlue === 'pistol' ? 1 : 0,
           canBuy: blueCoins >= shopPrice(PISTOL_COST),
+        },
+        {
+          id: 'pistolUpRed',
+          title: 'AK-47',
+          desc: `R · snabbare · ${AK_DAMAGE} dmg`,
+          cost: shopPrice(PISTOL_UPGRADE_COST),
+          side: 'Röd',
+          owned: inventory.pistolUpRed ? 1 : 0,
+          canBuy:
+            inventory.weaponRed === 'pistol' &&
+            !inventory.pistolUpRed &&
+            redCoins >= shopPrice(PISTOL_UPGRADE_COST),
+        },
+        {
+          id: 'pistolUpBlue',
+          title: 'AK-47',
+          desc: `B · snabbare · ${AK_DAMAGE} dmg`,
+          cost: shopPrice(PISTOL_UPGRADE_COST),
+          side: 'Blå',
+          owned: inventory.pistolUpBlue ? 1 : 0,
+          canBuy:
+            inventory.weaponBlue === 'pistol' &&
+            !inventory.pistolUpBlue &&
+            blueCoins >= shopPrice(PISTOL_UPGRADE_COST),
         },
       ]
 
@@ -1829,6 +1874,25 @@ function FightingBalls() {
 
     function buyShopItem(id) {
       if (!shopOpen) return
+      if (id === 'pistolUpRed' || id === 'pistolUpBlue') {
+        const side = id === 'pistolUpRed' ? 'red' : 'blue'
+        const hasPistol =
+          side === 'red' ? inventory.weaponRed === 'pistol' : inventory.weaponBlue === 'pistol'
+        const already =
+          side === 'red' ? inventory.pistolUpRed : inventory.pistolUpBlue
+        if (!hasPistol || already) return
+        const price = shopPrice(PISTOL_UPGRADE_COST)
+        if (side === 'red') {
+          if (redCoins < price) return
+          redCoins -= price
+          inventory.pistolUpRed = true
+        } else {
+          if (blueCoins < price) return
+          blueCoins -= price
+          inventory.pistolUpBlue = true
+        }
+        return
+      }
       const map = {
         glovesRed: { side: 'red', weapon: 'gloves', cost: GLOVES_COST },
         glovesBlue: { side: 'blue', weapon: 'gloves', cost: GLOVES_COST },
@@ -2031,6 +2095,8 @@ function FightingBalls() {
       bodyguards.length = 0
       inventory.weaponRed = 'knife'
       inventory.weaponBlue = 'knife'
+      inventory.pistolUpRed = false
+      inventory.pistolUpBlue = false
       resetFighters()
     }
 
@@ -2350,62 +2416,107 @@ function FightingBalls() {
 
           if (kind === 'pistol') {
             const charge = pistolChargeT(ball, now)
-            ctx.translate(r * 0.85, r * 0.15)
+            const upgraded = hasPistolUpgrade(ball)
+            ctx.translate(r * (upgraded ? 0.55 : 0.85), r * 0.1)
             // Laddningsaura
             if (charge > 0) {
-              const pulse = 0.55 + Math.sin(now * 0.04) * 0.2
-              const aura = ctx.createRadialGradient(r * 0.5, 0, 2, r * 0.5, 0, r * (1.1 + charge))
+              const pulse = 0.55 + Math.sin(now * (upgraded ? 0.07 : 0.04)) * 0.2
+              const aura = ctx.createRadialGradient(r * 0.8, 0, 2, r * 0.8, 0, r * (1.2 + charge))
               aura.addColorStop(0, `rgba(255, 230, 120, ${0.55 * charge * pulse})`)
               aura.addColorStop(0.5, `rgba(255, 140, 40, ${0.35 * charge})`)
               aura.addColorStop(1, 'transparent')
               ctx.fillStyle = aura
               ctx.beginPath()
-              ctx.arc(r * 0.55, 0, r * (1.2 + charge * 0.6), 0, Math.PI * 2)
+              ctx.arc(r * 0.9, 0, r * (1.15 + charge * 0.5), 0, Math.PI * 2)
               ctx.fill()
-              // Snurrande laddningsring
               ctx.strokeStyle = `rgba(255, 220, 100, ${0.4 + charge * 0.55})`
               ctx.lineWidth = 2.5 + charge * 2
               ctx.beginPath()
               ctx.arc(
-                r * 0.45,
+                r * 0.7,
                 0,
-                r * (0.75 + charge * 0.35),
-                now * 0.012,
-                now * 0.012 + Math.PI * 1.4 * charge + 0.4,
-              )
-              ctx.stroke()
-              ctx.strokeStyle = `rgba(255, 255, 255, ${0.25 + charge * 0.5})`
-              ctx.lineWidth = 1.5
-              ctx.beginPath()
-              ctx.arc(
-                r * 0.45,
-                0,
-                r * (0.55 + charge * 0.25),
-                -now * 0.018,
-                -now * 0.018 + Math.PI * charge,
+                r * (0.85 + charge * 0.3),
+                now * (upgraded ? 0.025 : 0.012),
+                now * (upgraded ? 0.025 : 0.012) + Math.PI * 1.4 * charge + 0.4,
               )
               ctx.stroke()
             }
-            ctx.fillStyle = '#2a2a2a'
-            ctx.fillRect(-r * 0.08, 0, r * 0.22, r * 0.42)
-            ctx.fillStyle = charge > 0.7 ? '#6b7280' : '#4b5563'
-            ctx.fillRect(0, -r * 0.12, r * 0.85, r * 0.28)
-            ctx.fillStyle = '#1f2937'
-            ctx.fillRect(r * 0.75, -r * 0.06, r * 0.45, r * 0.14)
-            ctx.fillStyle = charge > 0.85 ? '#ffe08a' : '#9ca3af'
-            ctx.fillRect(r * 0.2, -r * 0.18, r * 0.12, r * 0.08)
-            // Pip-glöd när laddad
-            if (charge > 0.15) {
-              ctx.fillStyle = `rgba(255, 200, 80, ${0.35 + charge * 0.55})`
+
+            if (upgraded) {
+              // AK-47 siluett
+              const body = ctx.createLinearGradient(0, 0, r * 2.2, 0)
+              body.addColorStop(0, '#3d2b1f')
+              body.addColorStop(0.35, '#5c4030')
+              body.addColorStop(1, '#2a2a2a')
+              ctx.fillStyle = body
               ctx.beginPath()
-              ctx.arc(r * 1.15, 0, r * (0.08 + charge * 0.14), 0, Math.PI * 2)
+              ctx.moveTo(-r * 0.15, -r * 0.12)
+              ctx.lineTo(r * 1.55, -r * 0.1)
+              ctx.lineTo(r * 1.55, r * 0.12)
+              ctx.lineTo(-r * 0.05, r * 0.18)
+              ctx.closePath()
               ctx.fill()
-            }
-            if (swinging && swingT < 0.35) {
-              ctx.fillStyle = `rgba(255,220,120,${0.7 * (1 - swingT / 0.35)})`
+              // Pipan
+              ctx.fillStyle = '#1a1a1a'
+              ctx.fillRect(r * 1.5, -r * 0.055, r * 1.05, r * 0.11)
+              // Magasin
+              ctx.fillStyle = '#2f2f2f'
               ctx.beginPath()
-              ctx.arc(r * 1.3, 0, r * 0.22, 0, Math.PI * 2)
+              ctx.moveTo(r * 0.55, r * 0.1)
+              ctx.lineTo(r * 0.75, r * 0.1)
+              ctx.lineTo(r * 0.85, r * 0.55)
+              ctx.lineTo(r * 0.48, r * 0.55)
+              ctx.closePath()
               ctx.fill()
+              // Kolv
+              ctx.fillStyle = '#4a3424'
+              ctx.beginPath()
+              ctx.moveTo(-r * 0.15, -r * 0.1)
+              ctx.lineTo(-r * 0.75, -r * 0.05)
+              ctx.lineTo(-r * 0.75, r * 0.28)
+              ctx.lineTo(-r * 0.05, r * 0.16)
+              ctx.closePath()
+              ctx.fill()
+              // Handguard
+              ctx.fillStyle = '#6b4423'
+              ctx.fillRect(r * 0.95, -r * 0.14, r * 0.5, r * 0.28)
+              // Sikte
+              ctx.fillStyle = '#111'
+              ctx.fillRect(r * 0.35, -r * 0.22, r * 0.1, r * 0.12)
+              ctx.fillRect(r * 1.35, -r * 0.2, r * 0.08, r * 0.1)
+              if (charge > 0.15) {
+                ctx.fillStyle = `rgba(255, 180, 60, ${0.4 + charge * 0.5})`
+                ctx.beginPath()
+                ctx.arc(r * 2.55, 0, r * (0.1 + charge * 0.12), 0, Math.PI * 2)
+                ctx.fill()
+              }
+              if (swinging && swingT < 0.4) {
+                ctx.fillStyle = `rgba(255,220,120,${0.75 * (1 - swingT / 0.4)})`
+                ctx.beginPath()
+                ctx.arc(r * 2.7, 0, r * 0.28, 0, Math.PI * 2)
+                ctx.fill()
+              }
+            } else {
+              ctx.fillStyle = '#2a2a2a'
+              ctx.fillRect(-r * 0.08, 0, r * 0.22, r * 0.42)
+              ctx.fillStyle = charge > 0.7 ? '#6b7280' : '#4b5563'
+              ctx.fillRect(0, -r * 0.12, r * 0.85, r * 0.28)
+              ctx.fillStyle = '#1f2937'
+              ctx.fillRect(r * 0.75, -r * 0.06, r * 0.45, r * 0.14)
+              ctx.fillStyle = charge > 0.85 ? '#ffe08a' : '#9ca3af'
+              ctx.fillRect(r * 0.2, -r * 0.18, r * 0.12, r * 0.08)
+              if (charge > 0.15) {
+                ctx.fillStyle = `rgba(255, 200, 80, ${0.35 + charge * 0.55})`
+                ctx.beginPath()
+                ctx.arc(r * 1.15, 0, r * (0.08 + charge * 0.14), 0, Math.PI * 2)
+                ctx.fill()
+              }
+              if (swinging && swingT < 0.35) {
+                ctx.fillStyle = `rgba(255,220,120,${0.7 * (1 - swingT / 0.35)})`
+                ctx.beginPath()
+                ctx.arc(r * 1.3, 0, r * 0.22, 0, Math.PI * 2)
+                ctx.fill()
+              }
             }
           } else if (kind === 'gloves') {
             ctx.translate(r * 0.95, 0)
