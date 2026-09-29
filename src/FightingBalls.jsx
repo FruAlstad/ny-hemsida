@@ -2,36 +2,28 @@ import { useEffect, useRef } from 'react'
 
 const MAX_FIGHTERS = 2
 const SPECTATOR_COUNT = 18
-const PLAYER_LIVES = 23
-const ENEMY_LIVES = 26
+const PLAYER_LIVES = 10
+const ENEMY_LIVES = 10
 const PLAYER_HIT_DAMAGE = 3
 const ENEMY_HIT_DAMAGE = 2
 const SHIELD_DURATION = 2500
 const SHIELD_USES_PER_ROUND = 3
+const LIFE_DRINK_COST = 3
+const LIFE_DRINK_HEAL = 5
 const KNIFE_DAMAGE = 4
 const KNIFE_COOLDOWN = 450
 const KNIFE_SWING_MS = 280
 const KNIFE_REACH = 28
-const GLOVES_COST = 10
-const GLOVES_DAMAGE = 5
-const GLOVES_COOLDOWN = 320
-const GLOVES_SWING_MS = 220
-const GLOVES_REACH = 22
-const SWORD_COST = 25
-const SWORD_DAMAGE = 8
-const SWORD_COOLDOWN = 520
-const SWORD_SWING_MS = 360
-const SWORD_REACH = 52
-const PISTOL_COST = 50
-const PISTOL_UPGRADE_COST = 40
-const PISTOL_DAMAGE = 4
-const AK_DAMAGE = 6
-const PISTOL_COOLDOWN = 550
-const PISTOL_SPEED = 17
-const PISTOL_RADIUS = 7
-const PISTOL_CHARGE_MS = 780
-const PISTOL_SPREAD = 0.32 // max vinkelfel — siktar men träffar inte alltid
-const PISTOL_FAST_MUL = 2.5 // AK-47: lite snabbare laddning + eldhastighet
+const FOOT_COST = 10
+const FOOT_DAMAGE = 3
+const FOOT_COOLDOWN = 500
+const FOOT_SWING_MS = 280
+const FOOT_REACH = 36
+const PING_COST = 10
+const PING_DAMAGE = 2
+const PING_COOLDOWN = 400
+const PING_SPEED = 15
+const PING_RADIUS = 8
 const SPEAR_DAMAGE = 3
 const SPEAR_COOLDOWN = 500
 const SPEAR_SWING_MS = 420
@@ -47,11 +39,14 @@ const BODYGUARD_DAMAGE = 1
 const BODYGUARD_TICK_MS = 1000
 const BODYGUARD_SPEED = 11
 const BODYGUARD_RADIUS = 18
+const BODYGUARD_COST = 5
 
 function rollKillCoins() {
-  // Varje kill: 1 coin, 1% chans på 25
-  if (Math.random() < 0.01) return 25
-  return 1
+  // 65%: 7, 34%: 8, 1%: 30
+  const r = Math.random()
+  if (r < 0.01) return 30
+  if (r < 0.35) return 8
+  return 7
 }
 const BOMB_SPEED = 18
 const BOMB_DAMAGE = 5
@@ -60,8 +55,8 @@ const BOMB_RADIUS = 14
 const BOMB_FUSE_MS = 200
 const BOMB_BLAST = 110
 const BOMB_USES_PER_ROUND = 3
-const RESPAWN_LIVES = 23
-const RESPAWN_LIVES_BLUE = 26
+const RESPAWN_LIVES = 10
+const RESPAWN_LIVES_BLUE = 10
 const RESPAWN_COUNTDOWN_MS = 3000
 const WIN_SCORE = 100
 const BOSS_SCORE = 15
@@ -114,7 +109,7 @@ function FightingBalls() {
     const particles = []
     const shocks = []
     const bombs = []
-    const bullets = []
+    const pingBalls = []
     const bodyguards = []
     let shake = 0
     let flash = 0
@@ -148,8 +143,10 @@ function FightingBalls() {
     const inventory = {
       weaponRed: 'knife',
       weaponBlue: 'knife',
-      pistolUpRed: false,
-      pistolUpBlue: false,
+      footLevel: 0,
+      pingLevel: 0,
+      lifeDrinkRed: 0,
+      lifeDrinkBlue: 0,
     }
 
     const fighters = []
@@ -193,7 +190,6 @@ function FightingBalls() {
         knifeReadyAt: 0,
         knifeSwingUntil: 0,
         knifeAngle: 0,
-        pistolChargeStart: 0,
         spearEquipped: false,
         spearReadyAt: 0,
         spearSwingUntil: 0,
@@ -207,7 +203,7 @@ function FightingBalls() {
     function resetFighters() {
       fighters.length = 0
       bombs.length = 0
-      bullets.length = 0
+      pingBalls.length = 0
       bodyguards.length = 0
       fighters.push(
         makeFighter(cx - arenaR * 0.25, cy, 0, 0, 0, true),
@@ -628,24 +624,14 @@ function FightingBalls() {
         ball.knifeSwingUntil = 0
         ball.knifeEquipped = false
       }
-      // Pistol siktar alltid mot motståndarbollen
       if (
         !ball.eliminated &&
         !ball.isBoss &&
-        getSideWeapon(ball) === 'pistol'
+        getSideWeapon(ball) === 'ping'
       ) {
-        ball.knifeAngle = aimPistolAngle(ball)
+        ball.knifeAngle = aimAtOpponent(ball)
         ball.face = Math.cos(ball.knifeAngle) >= 0 ? 1 : -1
-        ball.meleeKind = 'pistol'
-      }
-      if (ball.pistolChargeStart) {
-        if (ball.eliminated || getSideWeapon(ball) !== 'pistol') {
-          ball.pistolChargeStart = 0
-        } else {
-          const t = pistolChargeT(ball, now)
-          ball.squash = Math.max(ball.squash, 0.12 + t * 0.22)
-          if (t >= 1) shootPistol(ball)
-        }
+        ball.meleeKind = 'ping'
       }
       if (ball.spearSwingUntil && now >= ball.spearSwingUntil) {
         ball.spearSwingUntil = 0
@@ -767,37 +753,28 @@ function FightingBalls() {
       return inventory.weaponBlue || 'knife'
     }
 
-    function hasPistolUpgrade(attacker) {
-      if (!attacker) return false
-      if (attacker.player || attacker.control === 'wasd' || attacker._bossSide === 'red') {
-        return !!inventory.pistolUpRed
-      }
-      return !!inventory.pistolUpBlue
+    function weaponUpgradeCost(baseCost, level) {
+      // level 0 → baspris, level 1 → 2×, level 2 → 4× …
+      return baseCost * 2 ** Math.max(0, level)
     }
 
-    function pistolChargeMsFor(attacker) {
-      return hasPistolUpgrade(attacker) ? PISTOL_CHARGE_MS / PISTOL_FAST_MUL : PISTOL_CHARGE_MS
+    function footDamage() {
+      if (inventory.footLevel <= 0) return FOOT_DAMAGE
+      return FOOT_DAMAGE + (inventory.footLevel - 1)
     }
 
-    function pistolCooldownFor(attacker) {
-      return hasPistolUpgrade(attacker) ? PISTOL_COOLDOWN / PISTOL_FAST_MUL : PISTOL_COOLDOWN
+    function pingDamage() {
+      if (inventory.pingLevel <= 0) return PING_DAMAGE
+      return PING_DAMAGE + (inventory.pingLevel - 1)
     }
 
     function meleeStats(kind) {
-      if (kind === 'gloves') {
+      if (kind === 'foot') {
         return {
-          damage: GLOVES_DAMAGE,
-          cooldown: GLOVES_COOLDOWN,
-          swingMs: GLOVES_SWING_MS,
-          reach: GLOVES_REACH,
-        }
-      }
-      if (kind === 'sword') {
-        return {
-          damage: SWORD_DAMAGE,
-          cooldown: SWORD_COOLDOWN,
-          swingMs: SWORD_SWING_MS,
-          reach: SWORD_REACH,
+          damage: footDamage(),
+          cooldown: FOOT_COOLDOWN,
+          swingMs: FOOT_SWING_MS,
+          reach: FOOT_REACH,
         }
       }
       return {
@@ -808,23 +785,7 @@ function FightingBalls() {
       }
     }
 
-    function useAttack(attacker) {
-      if (!attacker || attacker.eliminated || attacker.lives <= 0) return
-      if (attacker.control !== 'arrows' && attacker.control !== 'wasd') return
-      const weapon = getSideWeapon(attacker)
-      if (weapon === 'pistol') {
-        beginPistolCharge(attacker)
-        return
-      }
-      swingMelee(attacker, weapon)
-    }
-
-    function pistolChargeT(attacker, now = performance.now()) {
-      if (!attacker?.pistolChargeStart) return 0
-      return Math.min(1, (now - attacker.pistolChargeStart) / pistolChargeMsFor(attacker))
-    }
-
-    function aimPistolAngle(attacker) {
+    function aimAtOpponent(attacker) {
       const target = bossMode
         ? fighters.find((f) => f.isBoss && !f.eliminated)
         : fighters.find((f) => f !== attacker && !f.eliminated)
@@ -837,70 +798,80 @@ function FightingBalls() {
       return angle
     }
 
-    function beginPistolCharge(attacker) {
-      const now = performance.now()
-      if (now < (attacker.knifeReadyAt || 0)) return
-      if (attacker.pistolChargeStart) return
-      attacker.pistolChargeStart = now
-      attacker.meleeKind = 'pistol'
-      attacker.knifeAngle = aimPistolAngle(attacker)
-      attacker.face = Math.cos(attacker.knifeAngle) >= 0 ? 1 : -1
+    function tryReturnPingBall(attacker, kind) {
+      if (!attacker || attacker.eliminated) return false
+      const reachExtra = kind === 'foot' ? FOOT_REACH + 18 : kind === 'ping' ? 44 : 0
+      if (!reachExtra) return false
+      const ar = getRadius(attacker)
+      let best = null
+      let bestD = Infinity
+      for (let i = 0; i < pingBalls.length; i += 1) {
+        const b = pingBalls[i]
+        const d = Math.hypot(b.x - attacker.x, b.y - attacker.y)
+        if (d < ar + b.r + reachExtra && d < bestD) {
+          best = b
+          bestD = d
+        }
+      }
+      if (!best) return false
+
+      const angle = aimAtOpponent(attacker)
+      const speed = PING_SPEED * (kind === 'foot' ? 1.25 : 1.15)
+      best.vx = Math.cos(angle) * speed + attacker.vx * 0.25
+      best.vy = Math.sin(angle) * speed + attacker.vy * 0.25
+      best.owner = attacker
+      best.life = 2.5
+      best.damage = kind === 'foot' ? footDamage() : pingDamage()
+      best.spin += 0.8
+      spawnBurst(best.x, best.y, kind === 'foot' ? 1.3 : 0.9)
+      shake = Math.min(14, shake + (kind === 'foot' ? 6 : 3))
+      return true
     }
 
-    function cancelPistolCharge(attacker) {
-      if (!attacker) return
-      attacker.pistolChargeStart = 0
-    }
-
-    function shootPistol(attacker) {
+    function shootPingPong(attacker) {
+      if (!attacker || attacker.eliminated || attacker.lives <= 0) return
+      if (attacker.control !== 'arrows') return
       const now = performance.now()
       if (now < (attacker.knifeReadyAt || 0)) return
 
-      const aim = aimPistolAngle(attacker)
-      const charge = Math.max(pistolChargeT(attacker, now), 0.85)
-      // Siktar på bollen men med spridning — inte 100% träff
-      const spreadScale = 1.2 - charge * 0.45
-      const spread = (Math.random() - 0.5) * 2 * PISTOL_SPREAD * spreadScale
-      const angle = aim + spread
+      const angle = aimAtOpponent(attacker)
       const nx = Math.cos(angle)
       const ny = Math.sin(angle)
-      bullets.push({
-        x: attacker.x + nx * (getRadius(attacker) + PISTOL_RADIUS),
-        y: attacker.y + ny * (getRadius(attacker) + PISTOL_RADIUS),
-        vx: nx * PISTOL_SPEED * (0.85 + 0.25 * charge) + attacker.vx * 0.2,
-        vy: ny * PISTOL_SPEED * (0.85 + 0.25 * charge) + attacker.vy * 0.2,
-        r: PISTOL_RADIUS,
-        life: 2.2,
-        owner: attacker,
-        damage: hasPistolUpgrade(attacker) ? AK_DAMAGE : PISTOL_DAMAGE,
-      })
-      attacker.pistolChargeStart = 0
-      attacker.knifeReadyAt = now + pistolCooldownFor(attacker)
+      const dmg = pingDamage()
+      attacker.knifeReadyAt = now + PING_COOLDOWN
       attacker.knifeEquipped = true
-      attacker.knifeSwingUntil = now + (hasPistolUpgrade(attacker) ? 120 : 200)
-      attacker.meleeKind = 'pistol'
-      attacker.knifeAngle = aim // pipan pekar kvar mot målet visuellt
-      attacker.squash = 0.4
-      attacker.face = Math.cos(aim) >= 0 ? 1 : -1
-      spawnBurst(
-        attacker.x + Math.cos(aim) * getRadius(attacker),
-        attacker.y + Math.sin(aim) * getRadius(attacker),
-        0.7,
-      )
-      shake = Math.min(12, shake + 4)
-      flash = Math.min(0.35, flash + 0.12)
+      attacker.knifeSwingUntil = now + 180
+      attacker.meleeKind = 'ping'
+      attacker.knifeAngle = angle
+      attacker.squash = 0.35
+      attacker.face = nx >= 0 ? 1 : -1
+
+      // Returnera boll i luften istället för att skjuta en ny
+      if (tryReturnPingBall(attacker, 'ping')) return
+
+      pingBalls.push({
+        x: attacker.x + nx * (getRadius(attacker) + PING_RADIUS),
+        y: attacker.y + ny * (getRadius(attacker) + PING_RADIUS),
+        vx: nx * PING_SPEED + attacker.vx * 0.25,
+        vy: ny * PING_SPEED + attacker.vy * 0.25,
+        r: PING_RADIUS,
+        life: 2.5,
+        spin: 0,
+        owner: attacker,
+        damage: dmg,
+      })
+      spawnBurst(attacker.x + nx * getRadius(attacker), attacker.y + ny * getRadius(attacker), 0.4)
     }
 
-    function updateBullets(dt) {
-      for (let i = bullets.length - 1; i >= 0; i -= 1) {
-        const b = bullets[i]
+    function updatePingBalls(dt) {
+      for (let i = pingBalls.length - 1; i >= 0; i -= 1) {
+        const b = pingBalls[i]
         b.x += b.vx * dt
         b.y += b.vy * dt
+        b.spin += 0.4 * dt
         b.life -= dt * 0.02
-        const dx = b.x - cx
-        const dy = b.y - cy
-        if (Math.hypot(dx, dy) > arenaR + 40 || b.life <= 0) {
-          bullets.splice(i, 1)
+        if (Math.hypot(b.x - cx, b.y - cy) > arenaR + 40 || b.life <= 0) {
+          pingBalls.splice(i, 1)
           continue
         }
         let hit = false
@@ -915,39 +886,46 @@ function FightingBalls() {
               f.lives -= b.damage
               if (f.isBoss) addBossDamage(b.owner, b.damage)
             }
-            f.squash = 0.55
+            f.squash = 0.5
             f.vx += b.vx * 0.2
             f.vy += b.vy * 0.2
-            spawnBurst(b.x, b.y, 1.2)
-            shake = Math.min(14, shake + 5)
+            spawnBurst(b.x, b.y, 1.1)
+            shake = Math.min(12, shake + 4)
             hit = true
             break
           }
         }
-        if (hit) bullets.splice(i, 1)
+        if (hit) pingBalls.splice(i, 1)
       }
     }
 
-    function drawBullet(b) {
+    function drawPingBall(b) {
       ctx.save()
       ctx.translate(b.x, b.y)
-      const glow = ctx.createRadialGradient(0, 0, 1, 0, 0, b.r * 2.2)
-      glow.addColorStop(0, 'rgba(255,220,120,0.7)')
-      glow.addColorStop(1, 'transparent')
-      ctx.fillStyle = glow
-      ctx.beginPath()
-      ctx.arc(0, 0, b.r * 2.2, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = '#f5d76e'
+      ctx.rotate(b.spin)
+      ctx.fillStyle = '#f5f5f5'
       ctx.beginPath()
       ctx.arc(0, 0, b.r, 0, Math.PI * 2)
       ctx.fill()
+      ctx.strokeStyle = '#e85d04'
+      ctx.lineWidth = 1.5
+      ctx.beginPath()
+      ctx.arc(0, 0, b.r, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.arc(0, 0, b.r * 0.55, -0.8, 0.8)
+      ctx.stroke()
       ctx.restore()
     }
 
-    function swingMelee(attacker, kind = 'knife') {
+    function swingMelee(attacker) {
       if (!attacker || attacker.eliminated || attacker.lives <= 0) return
       if (attacker.control !== 'arrows' && attacker.control !== 'wasd') return
+      const kind = getSideWeapon(attacker)
+      if (kind === 'ping') {
+        shootPingPong(attacker)
+        return
+      }
       const now = performance.now()
       if (now < (attacker.knifeReadyAt || 0)) return
       const stats = meleeStats(kind)
@@ -956,12 +934,7 @@ function FightingBalls() {
         ? fighters.find((f) => f.isBoss && !f.eliminated)
         : fighters.find((f) => f !== attacker && !f.eliminated)
 
-      let angle = (attacker.face || 1) > 0 ? 0 : Math.PI
-      if (target) {
-        angle = Math.atan2(target.y - attacker.y, target.x - attacker.x)
-      } else if (attacker.vx !== 0 || attacker.vy !== 0) {
-        angle = Math.atan2(attacker.vy, attacker.vx)
-      }
+      let angle = aimAtOpponent(attacker)
 
       attacker.knifeReadyAt = now + stats.cooldown
       attacker.knifeSwingUntil = now + stats.swingMs
@@ -971,23 +944,30 @@ function FightingBalls() {
       attacker.squash = 0.45
       attacker.face = Math.cos(angle) >= 0 ? 1 : -1
 
+      // Spark / returnera pingisboll i luften
+      const returned = tryReturnPingBall(attacker, kind)
+
       if (!target) {
-        spawnBurst(
-          attacker.x + Math.cos(angle) * ballR,
-          attacker.y + Math.sin(angle) * ballR,
-          0.5,
-        )
+        if (!returned) {
+          spawnBurst(
+            attacker.x + Math.cos(angle) * ballR,
+            attacker.y + Math.sin(angle) * ballR,
+            0.5,
+          )
+        }
         return
       }
 
       const dist = Math.hypot(target.x - attacker.x, target.y - attacker.y)
       const reach = getRadius(attacker) + getRadius(target) + stats.reach
       if (dist > reach) {
-        spawnBurst(
-          attacker.x + Math.cos(angle) * ballR * 1.2,
-          attacker.y + Math.sin(angle) * ballR * 1.2,
-          0.55,
-        )
+        if (!returned) {
+          spawnBurst(
+            attacker.x + Math.cos(angle) * ballR * 1.2,
+            attacker.y + Math.sin(angle) * ballR * 1.2,
+            0.55,
+          )
+        }
         return
       }
 
@@ -1000,18 +980,20 @@ function FightingBalls() {
           target.lives -= stats.damage
         }
       }
-      target.squash = 0.7
-      target.vx += Math.cos(angle) * (kind === 'sword' ? 12 : 10)
-      target.vy += Math.sin(angle) * (kind === 'sword' ? 12 : 10)
-      spawnBurst(target.x, target.y, kind === 'sword' ? 2.6 : 2.2)
-      shake = Math.min(20, shake + (kind === 'sword' ? 12 : 10))
-      flash = Math.min(0.55, flash + 0.25)
+      const kick = kind === 'foot'
+      target.squash = kick ? 0.55 : 0.7
+      target.vx += Math.cos(angle) * (kick ? 14 : 10)
+      target.vy += Math.sin(angle) * (kick ? 14 : 10)
+      spawnBurst(target.x, target.y, kick ? 1.8 : 2.2)
+      shake = Math.min(20, shake + (kick ? 8 : 10))
+      flash = Math.min(0.55, flash + (kick ? 0.18 : 0.25))
       triggerCheer()
     }
 
     function swingKnife(attacker) {
-      useAttack(attacker)
+      swingMelee(attacker)
     }
+
 
     function swingSpear(attacker) {
       if (!attacker || attacker.eliminated || attacker.lives <= 0) return
@@ -1168,7 +1150,6 @@ function FightingBalls() {
       ball.knifeEquipped = false
       ball.knifeReadyAt = 0
       ball.knifeSwingUntil = 0
-      ball.pistolChargeStart = 0
       ball.spearEquipped = false
       ball.spearReadyAt = 0
       ball.spearSwingUntil = 0
@@ -1235,7 +1216,7 @@ function FightingBalls() {
       shopOpen = false
       shopPausedAt = 0
       bombs.length = 0
-      bullets.length = 0
+      pingBalls.length = 0
       bodyguards.length = 0
       clearKeys()
       // Behåll poäng/guld — fortsätt mot 30
@@ -1251,7 +1232,7 @@ function FightingBalls() {
       bossDamageBlue = 0
       lastBossKiller = null
       bombs.length = 0
-      bullets.length = 0
+      pingBalls.length = 0
       bodyguards.length = 0
       fighters.length = 0
       clearKeys()
@@ -1416,7 +1397,6 @@ function FightingBalls() {
         if (f.coolUntil > 0) f.coolUntil += ms
         if (f.knifeReadyAt > 0) f.knifeReadyAt += ms
         if (f.knifeSwingUntil > 0) f.knifeSwingUntil += ms
-        if (f.pistolChargeStart > 0) f.pistolChargeStart += ms
       }
       for (let i = 0; i < bombs.length; i += 1) {
         if (bombs[i].fuseUntil > 0) bombs[i].fuseUntil += ms
@@ -1672,7 +1652,7 @@ function FightingBalls() {
       if (!shopOpen) return
 
       const panelW = Math.min(440, width * 0.92)
-      const panelH = Math.min(640, height * 0.9)
+      const panelH = Math.min(560, height * 0.88)
       const px = width * 0.5 - panelW * 0.5
       const py = height * 0.5 - panelH * 0.5
 
@@ -1707,87 +1687,75 @@ function FightingBalls() {
 
       const items = [
         {
-          id: 'glovesRed',
-          title: 'Boxningshänder',
-          desc: `R · Q · ${GLOVES_DAMAGE} dmg`,
-          cost: shopPrice(GLOVES_COST),
+          id: 'footRed',
+          title: inventory.footLevel > 0 ? `Fot Lv${inventory.footLevel}` : 'Fot',
+          desc:
+            inventory.footLevel > 0
+              ? `R · Q · +1 dmg · nu ${footDamage()} → ${footDamage() + 1}`
+              : `R · Q · spark · ${FOOT_DAMAGE} dmg`,
+          cost: shopPrice(weaponUpgradeCost(FOOT_COST, inventory.footLevel)),
           side: 'Röd',
-          owned: inventory.weaponRed === 'gloves' ? 1 : 0,
-          canBuy: redCoins >= shopPrice(GLOVES_COST),
+          owned: inventory.footLevel,
+          canBuy: redCoins >= shopPrice(weaponUpgradeCost(FOOT_COST, inventory.footLevel)),
         },
         {
-          id: 'glovesBlue',
-          title: 'Boxningshänder',
-          desc: `B · 2 · ${GLOVES_DAMAGE} dmg`,
-          cost: shopPrice(GLOVES_COST),
+          id: 'pingBlue',
+          title: inventory.pingLevel > 0 ? `Pingis Lv${inventory.pingLevel}` : 'Pingis',
+          desc:
+            inventory.pingLevel > 0
+              ? `B · 2 · +1 dmg · nu ${pingDamage()} → ${pingDamage() + 1}`
+              : `B · 2 · rack + boll · ${PING_DAMAGE} dmg`,
+          cost: shopPrice(weaponUpgradeCost(PING_COST, inventory.pingLevel)),
           side: 'Blå',
-          owned: inventory.weaponBlue === 'gloves' ? 1 : 0,
-          canBuy: blueCoins >= shopPrice(GLOVES_COST),
+          owned: inventory.pingLevel,
+          canBuy: blueCoins >= shopPrice(weaponUpgradeCost(PING_COST, inventory.pingLevel)),
         },
         {
-          id: 'swordRed',
-          title: 'Stort svärd',
-          desc: `R · Q · ${SWORD_DAMAGE} dmg · lång range`,
-          cost: shopPrice(SWORD_COST),
+          id: 'lifeDrinkRed',
+          title: 'Livedryck',
+          desc: `R · R · +${LIFE_DRINK_HEAL} liv`,
+          cost: shopPrice(LIFE_DRINK_COST),
           side: 'Röd',
-          owned: inventory.weaponRed === 'sword' ? 1 : 0,
-          canBuy: redCoins >= shopPrice(SWORD_COST),
+          owned: inventory.lifeDrinkRed,
+          canBuy: redCoins >= shopPrice(LIFE_DRINK_COST),
         },
         {
-          id: 'swordBlue',
-          title: 'Stort svärd',
-          desc: `B · 2 · ${SWORD_DAMAGE} dmg · lång range`,
-          cost: shopPrice(SWORD_COST),
+          id: 'lifeDrinkBlue',
+          title: 'Livedryck',
+          desc: `B · 3 · +${LIFE_DRINK_HEAL} liv`,
+          cost: shopPrice(LIFE_DRINK_COST),
           side: 'Blå',
-          owned: inventory.weaponBlue === 'sword' ? 1 : 0,
-          canBuy: blueCoins >= shopPrice(SWORD_COST),
+          owned: inventory.lifeDrinkBlue,
+          canBuy: blueCoins >= shopPrice(LIFE_DRINK_COST),
         },
         {
-          id: 'pistolRed',
-          title: 'Pistol',
-          desc: `R · håll Q · ladda · ${PISTOL_DAMAGE} dmg`,
-          cost: shopPrice(PISTOL_COST),
+          id: 'bodyguardRed',
+          title: 'Bodyguard',
+          desc: 'R · lila · 1/sek · 6.7s',
+          cost: shopPrice(BODYGUARD_COST),
           side: 'Röd',
-          owned: inventory.weaponRed === 'pistol' ? 1 : 0,
-          canBuy: redCoins >= shopPrice(PISTOL_COST),
+          owned: bodyguards.filter((g) => g.owner?.player).length,
+          canBuy: redCoins >= shopPrice(BODYGUARD_COST),
         },
         {
-          id: 'pistolBlue',
-          title: 'Pistol',
-          desc: `B · håll 2 · ladda · ${PISTOL_DAMAGE} dmg`,
-          cost: shopPrice(PISTOL_COST),
+          id: 'bodyguardBlue',
+          title: 'Bodyguard',
+          desc: 'B · lila · 1/sek · 6.7s',
+          cost: shopPrice(BODYGUARD_COST),
           side: 'Blå',
-          owned: inventory.weaponBlue === 'pistol' ? 1 : 0,
-          canBuy: blueCoins >= shopPrice(PISTOL_COST),
-        },
-        {
-          id: 'pistolUpRed',
-          title: 'AK-47',
-          desc: `R · snabbare · ${AK_DAMAGE} dmg`,
-          cost: shopPrice(PISTOL_UPGRADE_COST),
-          side: 'Röd',
-          owned: inventory.pistolUpRed ? 1 : 0,
-          canBuy:
-            inventory.weaponRed === 'pistol' &&
-            !inventory.pistolUpRed &&
-            redCoins >= shopPrice(PISTOL_UPGRADE_COST),
-        },
-        {
-          id: 'pistolUpBlue',
-          title: 'AK-47',
-          desc: `B · snabbare · ${AK_DAMAGE} dmg`,
-          cost: shopPrice(PISTOL_UPGRADE_COST),
-          side: 'Blå',
-          owned: inventory.pistolUpBlue ? 1 : 0,
-          canBuy:
-            inventory.weaponBlue === 'pistol' &&
-            !inventory.pistolUpBlue &&
-            blueCoins >= shopPrice(PISTOL_UPGRADE_COST),
+          owned: bodyguards.filter((g) => g.owner && !g.owner.player).length,
+          canBuy: blueCoins >= shopPrice(BODYGUARD_COST),
         },
       ]
 
       const startY = py + 88
       const rowH = 44
+      if (items.length === 0) {
+        ctx.textAlign = 'center'
+        ctx.fillStyle = 'rgba(255,255,255,0.55)'
+        ctx.font = '16px Figtree, sans-serif'
+        ctx.fillText('Inga varor just nu', width * 0.5, startY + 40)
+      }
       items.forEach((item, i) => {
         const y = startY + i * rowH
         const bx = px + panelW - 108
@@ -1874,44 +1842,59 @@ function FightingBalls() {
 
     function buyShopItem(id) {
       if (!shopOpen) return
-      if (id === 'pistolUpRed' || id === 'pistolUpBlue') {
-        const side = id === 'pistolUpRed' ? 'red' : 'blue'
-        const hasPistol =
-          side === 'red' ? inventory.weaponRed === 'pistol' : inventory.weaponBlue === 'pistol'
-        const already =
-          side === 'red' ? inventory.pistolUpRed : inventory.pistolUpBlue
-        if (!hasPistol || already) return
-        const price = shopPrice(PISTOL_UPGRADE_COST)
-        if (side === 'red') {
-          if (redCoins < price) return
-          redCoins -= price
-          inventory.pistolUpRed = true
-        } else {
-          if (blueCoins < price) return
-          blueCoins -= price
-          inventory.pistolUpBlue = true
-        }
+      if (id === 'lifeDrinkRed') {
+        const cost = shopPrice(LIFE_DRINK_COST)
+        if (redCoins < cost) return
+        redCoins -= cost
+        inventory.lifeDrinkRed += 1
         return
       }
-      const map = {
-        glovesRed: { side: 'red', weapon: 'gloves', cost: GLOVES_COST },
-        glovesBlue: { side: 'blue', weapon: 'gloves', cost: GLOVES_COST },
-        swordRed: { side: 'red', weapon: 'sword', cost: SWORD_COST },
-        swordBlue: { side: 'blue', weapon: 'sword', cost: SWORD_COST },
-        pistolRed: { side: 'red', weapon: 'pistol', cost: PISTOL_COST },
-        pistolBlue: { side: 'blue', weapon: 'pistol', cost: PISTOL_COST },
+      if (id === 'lifeDrinkBlue') {
+        const cost = shopPrice(LIFE_DRINK_COST)
+        if (blueCoins < cost) return
+        blueCoins -= cost
+        inventory.lifeDrinkBlue += 1
+        return
       }
-      const item = map[id]
-      if (!item) return
-      const price = shopPrice(item.cost)
-      if (item.side === 'red') {
+      if (id === 'bodyguardRed') {
+        const cost = shopPrice(BODYGUARD_COST)
+        if (redCoins < cost) return
+        const red = fighters.find((f) => f.player && !f.eliminated)
+        const target = bossMode
+          ? fighters.find((f) => f.isBoss && !f.eliminated)
+          : fighters.find((f) => f.control === 'arrows' && !f.eliminated)
+        if (!red || !target) return
+        redCoins -= cost
+        spawnBodyguard(red, target)
+        return
+      }
+      if (id === 'bodyguardBlue') {
+        const cost = shopPrice(BODYGUARD_COST)
+        if (blueCoins < cost) return
+        const blue = fighters.find((f) => f.control === 'arrows' && !f.eliminated)
+        const target = bossMode
+          ? fighters.find((f) => f.isBoss && !f.eliminated)
+          : fighters.find((f) => f.player && !f.eliminated)
+        if (!blue || !target) return
+        blueCoins -= cost
+        spawnBodyguard(blue, target)
+        return
+      }
+      if (id === 'footRed') {
+        const price = shopPrice(weaponUpgradeCost(FOOT_COST, inventory.footLevel))
         if (redCoins < price) return
         redCoins -= price
-        inventory.weaponRed = item.weapon
-      } else {
+        inventory.weaponRed = 'foot'
+        inventory.footLevel += 1
+        return
+      }
+      if (id === 'pingBlue') {
+        const price = shopPrice(weaponUpgradeCost(PING_COST, inventory.pingLevel))
         if (blueCoins < price) return
         blueCoins -= price
-        inventory.weaponBlue = item.weapon
+        inventory.weaponBlue = 'ping'
+        inventory.pingLevel += 1
+        return
       }
     }
 
@@ -2091,12 +2074,14 @@ function FightingBalls() {
       pendingBossAfterShop = false
       pendingWinAfterShop = null
       bombs.length = 0
-      bullets.length = 0
+      pingBalls.length = 0
       bodyguards.length = 0
       inventory.weaponRed = 'knife'
       inventory.weaponBlue = 'knife'
-      inventory.pistolUpRed = false
-      inventory.pistolUpBlue = false
+      inventory.footLevel = 0
+      inventory.pingLevel = 0
+      inventory.lifeDrinkRed = 0
+      inventory.lifeDrinkBlue = 0
       resetFighters()
     }
 
@@ -2379,7 +2364,7 @@ function FightingBalls() {
       }
       ctx.stroke()
 
-      // Shop-vapen syns alltid i händerna; kniv bara under sving
+      // Fot / pingisrack syns alltid; kniv bara under sving
       {
         const weapon = happy || ball.isBoss ? null : getSideWeapon(ball)
         const now = performance.now()
@@ -2387,171 +2372,91 @@ function FightingBalls() {
           !!(ball.knifeEquipped || (ball.knifeSwingUntil && now < ball.knifeSwingUntil))
         const kind = swinging ? ball.meleeKind || weapon || 'knife' : weapon
         const showHeld =
-          kind === 'gloves' || kind === 'sword' || kind === 'pistol' || (swinging && kind === 'knife')
+          kind === 'foot' || kind === 'ping' || (swinging && kind === 'knife')
 
         if (showHeld && kind) {
           const swingMs =
-            kind === 'sword'
-              ? SWORD_SWING_MS
-              : kind === 'gloves'
-                ? GLOVES_SWING_MS
-                : KNIFE_SWING_MS
+            kind === 'foot' ? FOOT_SWING_MS : kind === 'ping' ? 180 : KNIFE_SWING_MS
           const swingLeft = swinging ? Math.max(0, (ball.knifeSwingUntil || 0) - now) : swingMs
           const swingT = swinging ? 1 - swingLeft / swingMs : 0
           const faceAngle =
-            kind === 'pistol' && typeof ball.knifeAngle === 'number'
+            typeof ball.knifeAngle === 'number' && (swinging || kind === 'ping')
               ? ball.knifeAngle
-              : typeof ball.knifeAngle === 'number' && (swinging || ball.pistolChargeStart)
-                ? ball.knifeAngle
-                : (ball.face || 1) > 0
-                  ? 0
-                  : Math.PI
+              : (ball.face || 1) > 0
+                ? 0
+                : Math.PI
           const swingArc = swinging
-            ? Math.sin(swingT * Math.PI) * (kind === 'sword' ? 0.85 : kind === 'pistol' ? 0.15 : 1.1)
+            ? Math.sin(swingT * Math.PI) * (kind === 'foot' ? 0.9 : kind === 'ping' ? 0.35 : 1.1)
             : 0
-          const dir = faceAngle + swingArc - (swinging && kind !== 'pistol' ? 0.55 : 0)
+          const dir = faceAngle + swingArc - (swinging && kind !== 'ping' ? 0.55 : 0)
 
           ctx.save()
           ctx.rotate(dir)
 
-          if (kind === 'pistol') {
-            const charge = pistolChargeT(ball, now)
-            const upgraded = hasPistolUpgrade(ball)
-            ctx.translate(r * (upgraded ? 0.55 : 0.85), r * 0.1)
-            // Laddningsaura
-            if (charge > 0) {
-              const pulse = 0.55 + Math.sin(now * (upgraded ? 0.07 : 0.04)) * 0.2
-              const aura = ctx.createRadialGradient(r * 0.8, 0, 2, r * 0.8, 0, r * (1.2 + charge))
-              aura.addColorStop(0, `rgba(255, 230, 120, ${0.55 * charge * pulse})`)
-              aura.addColorStop(0.5, `rgba(255, 140, 40, ${0.35 * charge})`)
-              aura.addColorStop(1, 'transparent')
-              ctx.fillStyle = aura
-              ctx.beginPath()
-              ctx.arc(r * 0.9, 0, r * (1.15 + charge * 0.5), 0, Math.PI * 2)
-              ctx.fill()
-              ctx.strokeStyle = `rgba(255, 220, 100, ${0.4 + charge * 0.55})`
-              ctx.lineWidth = 2.5 + charge * 2
-              ctx.beginPath()
-              ctx.arc(
-                r * 0.7,
-                0,
-                r * (0.85 + charge * 0.3),
-                now * (upgraded ? 0.025 : 0.012),
-                now * (upgraded ? 0.025 : 0.012) + Math.PI * 1.4 * charge + 0.4,
-              )
-              ctx.stroke()
-            }
-
-            if (upgraded) {
-              // AK-47 siluett
-              const body = ctx.createLinearGradient(0, 0, r * 2.2, 0)
-              body.addColorStop(0, '#3d2b1f')
-              body.addColorStop(0.35, '#5c4030')
-              body.addColorStop(1, '#2a2a2a')
-              ctx.fillStyle = body
-              ctx.beginPath()
-              ctx.moveTo(-r * 0.15, -r * 0.12)
-              ctx.lineTo(r * 1.55, -r * 0.1)
-              ctx.lineTo(r * 1.55, r * 0.12)
-              ctx.lineTo(-r * 0.05, r * 0.18)
-              ctx.closePath()
-              ctx.fill()
-              // Pipan
-              ctx.fillStyle = '#1a1a1a'
-              ctx.fillRect(r * 1.5, -r * 0.055, r * 1.05, r * 0.11)
-              // Magasin
-              ctx.fillStyle = '#2f2f2f'
-              ctx.beginPath()
-              ctx.moveTo(r * 0.55, r * 0.1)
-              ctx.lineTo(r * 0.75, r * 0.1)
-              ctx.lineTo(r * 0.85, r * 0.55)
-              ctx.lineTo(r * 0.48, r * 0.55)
-              ctx.closePath()
-              ctx.fill()
-              // Kolv
-              ctx.fillStyle = '#4a3424'
-              ctx.beginPath()
-              ctx.moveTo(-r * 0.15, -r * 0.1)
-              ctx.lineTo(-r * 0.75, -r * 0.05)
-              ctx.lineTo(-r * 0.75, r * 0.28)
-              ctx.lineTo(-r * 0.05, r * 0.16)
-              ctx.closePath()
-              ctx.fill()
-              // Handguard
-              ctx.fillStyle = '#6b4423'
-              ctx.fillRect(r * 0.95, -r * 0.14, r * 0.5, r * 0.28)
-              // Sikte
-              ctx.fillStyle = '#111'
-              ctx.fillRect(r * 0.35, -r * 0.22, r * 0.1, r * 0.12)
-              ctx.fillRect(r * 1.35, -r * 0.2, r * 0.08, r * 0.1)
-              if (charge > 0.15) {
-                ctx.fillStyle = `rgba(255, 180, 60, ${0.4 + charge * 0.5})`
-                ctx.beginPath()
-                ctx.arc(r * 2.55, 0, r * (0.1 + charge * 0.12), 0, Math.PI * 2)
-                ctx.fill()
-              }
-              if (swinging && swingT < 0.4) {
-                ctx.fillStyle = `rgba(255,220,120,${0.75 * (1 - swingT / 0.4)})`
-                ctx.beginPath()
-                ctx.arc(r * 2.7, 0, r * 0.28, 0, Math.PI * 2)
-                ctx.fill()
-              }
-            } else {
-              ctx.fillStyle = '#2a2a2a'
-              ctx.fillRect(-r * 0.08, 0, r * 0.22, r * 0.42)
-              ctx.fillStyle = charge > 0.7 ? '#6b7280' : '#4b5563'
-              ctx.fillRect(0, -r * 0.12, r * 0.85, r * 0.28)
-              ctx.fillStyle = '#1f2937'
-              ctx.fillRect(r * 0.75, -r * 0.06, r * 0.45, r * 0.14)
-              ctx.fillStyle = charge > 0.85 ? '#ffe08a' : '#9ca3af'
-              ctx.fillRect(r * 0.2, -r * 0.18, r * 0.12, r * 0.08)
-              if (charge > 0.15) {
-                ctx.fillStyle = `rgba(255, 200, 80, ${0.35 + charge * 0.55})`
-                ctx.beginPath()
-                ctx.arc(r * 1.15, 0, r * (0.08 + charge * 0.14), 0, Math.PI * 2)
-                ctx.fill()
-              }
-              if (swinging && swingT < 0.35) {
-                ctx.fillStyle = `rgba(255,220,120,${0.7 * (1 - swingT / 0.35)})`
-                ctx.beginPath()
-                ctx.arc(r * 1.3, 0, r * 0.22, 0, Math.PI * 2)
-                ctx.fill()
-              }
-            }
-          } else if (kind === 'gloves') {
-            ctx.translate(r * 0.95, 0)
-            ctx.fillStyle = '#8b1a1a'
-            ctx.beginPath()
-            ctx.ellipse(r * 0.35, -r * 0.22, r * 0.28, r * 0.22, 0, 0, Math.PI * 2)
-            ctx.ellipse(r * 0.35, r * 0.22, r * 0.28, r * 0.22, 0, 0, Math.PI * 2)
-            ctx.fill()
-            ctx.fillStyle = '#f5f5f5'
-            ctx.beginPath()
-            ctx.ellipse(r * 0.42, -r * 0.22, r * 0.12, r * 0.1, 0, 0, Math.PI * 2)
-            ctx.ellipse(r * 0.42, r * 0.22, r * 0.12, r * 0.1, 0, 0, Math.PI * 2)
-            ctx.fill()
-          } else if (kind === 'sword') {
-            ctx.translate(r * 0.55, r * 0.05)
-            const idleTilt = swinging ? 0 : -0.35
+          if (kind === 'foot') {
+            // Sparkfot
+            ctx.translate(r * 0.85, r * 0.15)
+            const idleTilt = swinging ? 0 : 0.25
             ctx.rotate(idleTilt)
-            const len = r * 2.05
-            const blade = ctx.createLinearGradient(0, 0, len, 0)
-            blade.addColorStop(0, '#9aa3ad')
-            blade.addColorStop(0.5, '#f2f5f8')
-            blade.addColorStop(1, '#6b7280')
+            ctx.fillStyle = '#1a1a1a'
+            ctx.beginPath()
+            ctx.ellipse(r * 0.35, 0, r * 0.55, r * 0.28, 0, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.fillStyle = '#333'
+            ctx.beginPath()
+            ctx.ellipse(r * 0.55, -r * 0.02, r * 0.28, r * 0.18, 0, 0, Math.PI * 2)
+            ctx.fill()
+            // Sulrand
+            ctx.strokeStyle = '#c9a227'
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.ellipse(r * 0.35, r * 0.08, r * 0.5, r * 0.12, 0, 0.2, Math.PI - 0.2)
+            ctx.stroke()
+            // Snören
+            ctx.strokeStyle = '#eee'
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.moveTo(r * 0.1, -r * 0.08)
+            ctx.lineTo(r * 0.45, -r * 0.12)
+            ctx.moveTo(r * 0.15, 0.02 * r)
+            ctx.lineTo(r * 0.48, -0.02 * r)
+            ctx.stroke()
+          } else if (kind === 'ping') {
+            // Pingisrack
+            ctx.translate(r * 0.7, 0)
+            // Skaft
+            ctx.fillStyle = '#6b3f1f'
+            ctx.fillRect(-r * 0.08, -r * 0.08, r * 0.55, r * 0.16)
+            // Blad
+            const blade = ctx.createRadialGradient(r * 0.85, 0, 2, r * 0.85, 0, r * 0.42)
+            blade.addColorStop(0, '#ff6b4a')
+            blade.addColorStop(1, '#c0392b')
             ctx.fillStyle = blade
             ctx.beginPath()
-            ctx.moveTo(len, 0)
-            ctx.lineTo(len * 0.2, -r * 0.16)
-            ctx.lineTo(-r * 0.1, -r * 0.1)
-            ctx.lineTo(-r * 0.1, r * 0.1)
-            ctx.lineTo(len * 0.2, r * 0.16)
-            ctx.closePath()
+            ctx.ellipse(r * 0.95, 0, r * 0.42, r * 0.32, 0, 0, Math.PI * 2)
             ctx.fill()
-            ctx.fillStyle = '#c9a227'
-            ctx.fillRect(-r * 0.18, -r * 0.22, r * 0.12, r * 0.44)
-            ctx.fillStyle = '#4a2c14'
-            ctx.fillRect(-r * 0.55, -r * 0.08, r * 0.4, r * 0.16)
+            ctx.strokeStyle = '#2a2a2a'
+            ctx.lineWidth = 2
+            ctx.stroke()
+            // Gummi-linjer
+            ctx.strokeStyle = 'rgba(0,0,0,0.2)'
+            ctx.lineWidth = 1
+            for (let i = -2; i <= 2; i += 1) {
+              ctx.beginPath()
+              ctx.moveTo(r * 0.7, i * r * 0.1)
+              ctx.lineTo(r * 1.2, i * r * 0.1)
+              ctx.stroke()
+            }
+            // Liten boll på rack när inte skjutit
+            if (!swinging) {
+              ctx.fillStyle = '#f5f5f5'
+              ctx.beginPath()
+              ctx.arc(r * 1.35, -r * 0.25, r * 0.12, 0, Math.PI * 2)
+              ctx.fill()
+              ctx.strokeStyle = '#e85d04'
+              ctx.lineWidth = 1
+              ctx.stroke()
+            }
           } else {
             ctx.translate(r * 0.9, r * 0.05)
             const blade = ctx.createLinearGradient(0, 0, r * 1.05, 0)
@@ -2573,11 +2478,11 @@ function FightingBalls() {
             ctx.fillRect(-r * 0.1, -r * 0.16, r * 0.07, r * 0.32)
           }
 
-          if (swinging && kind !== 'pistol' && swingT > 0.05 && swingT < 0.95) {
+          if (swinging && kind !== 'ping' && swingT > 0.05 && swingT < 0.95) {
             ctx.strokeStyle = `rgba(220,240,255,${0.55 * Math.sin(swingT * Math.PI)})`
-            ctx.lineWidth = kind === 'sword' ? 4 : 3
+            ctx.lineWidth = 3
             ctx.beginPath()
-            ctx.arc(0, 0, r * (kind === 'sword' ? 1.6 : 1.15), -0.9, 0.4)
+            ctx.arc(0, 0, r * (kind === 'foot' ? 1.35 : 1.15), -0.9, 0.4)
             ctx.stroke()
           }
           ctx.restore()
@@ -2740,8 +2645,8 @@ function FightingBalls() {
           for (let i = 0; i < bombs.length; i += 1) {
             drawBomb(bombs[i])
           }
-          for (let i = 0; i < bullets.length; i += 1) {
-            drawBullet(bullets[i])
+          for (let i = 0; i < pingBalls.length; i += 1) {
+            drawPingBall(pingBalls[i])
           }
           for (let i = 0; i < bodyguards.length; i += 1) {
             drawBodyguard(bodyguards[i])
@@ -2767,7 +2672,7 @@ function FightingBalls() {
         }
 
         updateBombs(dt)
-        updateBullets(dt)
+        updatePingBalls(dt)
         updateBodyguards(dt, now)
         removeDeadFighters()
         updateSpectators(dt, now)
@@ -2831,8 +2736,8 @@ function FightingBalls() {
           drawBomb(bombs[i])
         }
 
-        for (let i = 0; i < bullets.length; i += 1) {
-          drawBullet(bullets[i])
+        for (let i = 0; i < pingBalls.length; i += 1) {
+          drawPingBall(pingBalls[i])
         }
 
         for (let i = 0; i < bodyguards.length; i += 1) {
@@ -2862,8 +2767,18 @@ function FightingBalls() {
     resize()
     window.addEventListener('resize', resize)
 
-    function useLifeDrink() {
-      // Livedryck borttagen från shoppen
+    function useLifeDrink(fighter, side) {
+      if (!fighter || fighter.eliminated || fighter.lives <= 0) return
+      if (side === 'red') {
+        if (inventory.lifeDrinkRed <= 0) return
+        inventory.lifeDrinkRed -= 1
+      } else {
+        if (inventory.lifeDrinkBlue <= 0) return
+        inventory.lifeDrinkBlue -= 1
+      }
+      fighter.lives = Math.min(fighter.maxLives || PLAYER_LIVES, fighter.lives + LIFE_DRINK_HEAL)
+      fighter.squash = 0.35
+      spawnBurst(fighter.x, fighter.y, 1.1)
     }
 
     function clearKeys() {
@@ -3003,15 +2918,6 @@ function FightingBalls() {
       if (e.key === 'ArrowRight') {
         keys.right = false
         e.preventDefault()
-      }
-      if (k === 'q') {
-        const player = fighters.find((f) => f.player)
-        if (player && getSideWeapon(player) === 'pistol') cancelPistolCharge(player)
-        return
-      }
-      if (k === '2' || e.code === 'Digit2' || e.code === 'Numpad2') {
-        const blue = fighters.find((f) => f.control === 'arrows')
-        if (blue && getSideWeapon(blue) === 'pistol') cancelPistolCharge(blue)
       }
     }
 
