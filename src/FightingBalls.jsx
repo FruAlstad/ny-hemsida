@@ -68,6 +68,10 @@ const BODYGUARD_TICK_MS = 1000
 const BODYGUARD_SPEED = 11
 const BODYGUARD_RADIUS = 18
 const BODYGUARD_COST = 5
+const SUS_COST = 10
+const SUS_DAMAGE = 5
+const SUS_TICK_MS = 1000
+const BURK_COST = 10
 
 function rollKillCoins() {
   // 65%: 7, 34%: 8, 1%: 30
@@ -140,6 +144,7 @@ function FightingBalls() {
     const pingBalls = []
     const arrows = []
     const bodyguards = []
+    const farts = []
     let shake = 0
     let flash = 0
     let cheer = 0
@@ -190,6 +195,10 @@ function FightingBalls() {
       pingLevel: 0,
       lifeDrinkRed: 0,
       lifeDrinkBlue: 0,
+      burkRed: 0,
+      burkBlue: 0,
+      fartCanRed: 0,
+      fartCanBlue: 0,
     }
 
     const fighters = []
@@ -249,6 +258,7 @@ function FightingBalls() {
       pingBalls.length = 0
       arrows.length = 0
       bodyguards.length = 0
+      farts.length = 0
       fighters.push(
         makeFighter(cx - arenaR * 0.25, cy, 0, 0, 0, true),
         makeFighter(cx + arenaR * 0.25, cy, 0, 0, 1, false),
@@ -293,8 +303,8 @@ function FightingBalls() {
 
       cx = width * 0.5
       cy = height * 0.5
-      arenaR = Math.min(width, height) * 0.78
-      ballR = Math.max(32, Math.min(50, arenaR * 0.128))
+arenaR = Math.min(width, height) * 0.78
+      ballR = Math.max(34, Math.min(54, arenaR * 0.14))
       spectatorR = Math.max(12, Math.min(22, arenaR * 0.055))
       resetFighters()
       placeSpectators()
@@ -1438,6 +1448,7 @@ function FightingBalls() {
       bombs.length = 0
       pingBalls.length = 0
       bodyguards.length = 0
+      farts.length = 0
       clearKeys()
       // Behåll poäng/guld — fortsätt mot 30
       resetFighters()
@@ -1454,6 +1465,7 @@ function FightingBalls() {
       bombs.length = 0
       pingBalls.length = 0
       bodyguards.length = 0
+      farts.length = 0
       fighters.length = 0
       clearKeys()
 
@@ -2072,7 +2084,7 @@ function FightingBalls() {
       if (!shopOpen) return
 
       const panelW = Math.min(460, width * 0.94)
-      const panelH = Math.min(640, height * 0.92)
+const panelH = Math.min(680, height * 0.92)
       const px = width * 0.5 - panelW * 0.5
       const py = height * 0.5 - panelH * 0.5
 
@@ -2250,10 +2262,52 @@ function FightingBalls() {
           owned: bodyguards.filter((g) => g.owner && !g.owner.player).length,
           canBuy: blueCoins >= shopPrice(BODYGUARD_COST),
         },
-      )
+        {
+          id: 'susRed',
+          title: 'Sus',
+          desc: `R · grön prut · ${SUS_DAMAGE}/sek`,
+          cost: shopPrice(SUS_COST),
+          side: 'Röd',
+          owned: farts.filter((g) => g.owner?.player).length + inventory.fartCanRed,
+          canBuy: redCoins >= shopPrice(SUS_COST),
+        },
+        {
+          id: 'susBlue',
+          title: 'Sus',
+          desc: `B · grön prut · ${SUS_DAMAGE}/sek`,
+          cost: shopPrice(SUS_COST),
+          side: 'Blå',
+          owned: farts.filter((g) => g.owner && !g.owner.player).length + inventory.fartCanBlue,
+          canBuy: blueCoins >= shopPrice(SUS_COST),
+        },
+        {
+          id: 'burkRed',
+          title: 'Burk',
+          desc: 'R · F · plocka upp prut',
+          cost: shopPrice(BURK_COST),
+          side: 'Röd',
+          owned: inventory.burkRed,
+          canBuy: redCoins >= shopPrice(BURK_COST),
+        },
+        {
+          id: 'burkBlue',
+          title: 'Burk',
+          desc: 'B · 4 · plocka upp prut',
+          cost: shopPrice(BURK_COST),
+          side: 'Blå',
+          owned: inventory.burkBlue,
+          canBuy: blueCoins >= shopPrice(BURK_COST),
+        },
+      ]
 
       const startY = py + 78
       const rowH = 38
+      if (items.length === 0) {
+        ctx.textAlign = 'center'
+        ctx.fillStyle = 'rgba(255,255,255,0.55)'
+        ctx.font = '16px Figtree, sans-serif'
+        ctx.fillText('Inga varor just nu', width * 0.5, startY + 40)
+      }
       items.forEach((item, i) => {
         const y = startY + i * rowH
         const bx = px + panelW - 100
@@ -2479,6 +2533,152 @@ function FightingBalls() {
         inventory.pingLevel += 1
         return
       }
+      if (id === 'susRed') {
+        const cost = shopPrice(SUS_COST)
+        if (redCoins < cost) return
+        const red = fighters.find((f) => f.player && !f.eliminated)
+        if (!red) return
+        redCoins -= cost
+        spawnFart(red)
+        return
+      }
+      if (id === 'susBlue') {
+        const cost = shopPrice(SUS_COST)
+        if (blueCoins < cost) return
+        const blue = fighters.find((f) => f.control === 'arrows' && !f.eliminated)
+        if (!blue) return
+        blueCoins -= cost
+        spawnFart(blue)
+        return
+      }
+      if (id === 'burkRed') {
+        const cost = shopPrice(BURK_COST)
+        if (redCoins < cost) return
+        redCoins -= cost
+        inventory.burkRed += 1
+        return
+      }
+      if (id === 'burkBlue') {
+        const cost = shopPrice(BURK_COST)
+        if (blueCoins < cost) return
+        blueCoins -= cost
+        inventory.burkBlue += 1
+        return
+      }
+    }
+
+    function fartRadius() {
+      // En fjärdedel av mapens yta → radie ≈ arenaR / 2
+      return arenaR * 0.5
+    }
+
+    function isRedSide(fighter) {
+      return !!(fighter && (fighter.player || fighter.control === 'wasd' || fighter._bossSide === 'red'))
+    }
+
+    function spawnFart(owner) {
+      if (!owner) return
+      const now = shopOpen && shopPausedAt > 0 ? shopPausedAt : performance.now()
+      farts.push({
+        x: owner.x,
+        y: owner.y,
+        r: fartRadius(),
+        owner,
+        nextTick: now + SUS_TICK_MS,
+        wobble: Math.random() * Math.PI * 2,
+      })
+      spawnBurst(owner.x, owner.y, 1.2)
+      shake = Math.min(10, shake + 3)
+    }
+
+    function tryPickupFart(fighter) {
+      if (!fighter || fighter.eliminated || fighter.lives <= 0) return false
+      const red = isRedSide(fighter)
+      if (red ? inventory.burkRed <= 0 : inventory.burkBlue <= 0) return false
+      for (let i = farts.length - 1; i >= 0; i -= 1) {
+        const g = farts[i]
+        if (Math.hypot(fighter.x - g.x, fighter.y - g.y) > g.r + getRadius(fighter) * 0.2) continue
+        farts.splice(i, 1)
+        if (red) inventory.fartCanRed += 1
+        else inventory.fartCanBlue += 1
+        spawnBurst(fighter.x, fighter.y, 0.9)
+        return true
+      }
+      return false
+    }
+
+    function releaseFartFromCan(fighter) {
+      if (!fighter || fighter.eliminated || fighter.lives <= 0) return
+      const red = isRedSide(fighter)
+      if (red) {
+        if (inventory.fartCanRed <= 0) return
+        inventory.fartCanRed -= 1
+      } else {
+        if (inventory.fartCanBlue <= 0) return
+        inventory.fartCanBlue -= 1
+      }
+      spawnFart(fighter)
+    }
+
+    function updateFarts(dt, now) {
+      for (let i = farts.length - 1; i >= 0; i -= 1) {
+        const g = farts[i]
+        g.r = fartRadius()
+        g.wobble += 0.04 * dt
+
+        // Auto-plocka med burk
+        for (let j = 0; j < fighters.length; j += 1) {
+          const f = fighters[j]
+          if (f.eliminated || f.lives <= 0) continue
+          const red = isRedSide(f)
+          const hasBurk = red ? inventory.burkRed > 0 : inventory.burkBlue > 0
+          if (!hasBurk) continue
+          if (Math.hypot(f.x - g.x, f.y - g.y) <= g.r + getRadius(f) * 0.15) {
+            farts.splice(i, 1)
+            if (red) inventory.fartCanRed += 1
+            else inventory.fartCanBlue += 1
+            spawnBurst(f.x, f.y, 0.9)
+            break
+          }
+        }
+        if (!farts[i] || farts[i] !== g) continue
+
+        if (now < g.nextTick) continue
+        g.nextTick = now + SUS_TICK_MS
+        for (let j = 0; j < fighters.length; j += 1) {
+          const f = fighters[j]
+          if (f === g.owner || f.eliminated || f.lives <= 0) continue
+          if (bossMode && !f.isBoss) continue
+          if (Math.hypot(f.x - g.x, f.y - g.y) > g.r) continue
+          const shielded = f.player && now < f.shieldUntil
+          if (!shielded) {
+            f.lives -= SUS_DAMAGE
+            if (f.isBoss) addBossDamage(g.owner, SUS_DAMAGE)
+          }
+          f.squash = Math.max(f.squash, 0.35)
+          spawnBurst(f.x, f.y, 0.55)
+        }
+      }
+    }
+
+    function drawFart(g, now = performance.now()) {
+      const pulse = 1 + Math.sin((now / 220) + g.wobble) * 0.04
+      const r = g.r * pulse
+      ctx.save()
+      const grad = ctx.createRadialGradient(g.x, g.y, r * 0.15, g.x, g.y, r)
+      grad.addColorStop(0, 'rgba(80, 220, 90, 0.45)')
+      grad.addColorStop(0.55, 'rgba(40, 160, 70, 0.28)')
+      grad.addColorStop(1, 'rgba(20, 90, 40, 0)')
+      ctx.fillStyle = grad
+      ctx.beginPath()
+      ctx.arc(g.x, g.y, r, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(120, 255, 140, 0.35)'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(g.x, g.y, r * 0.92, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
     }
 
     function spawnBodyguard(owner, target) {
@@ -2675,6 +2875,11 @@ function FightingBalls() {
       inventory.pingLevel = 0
       inventory.lifeDrinkRed = 0
       inventory.lifeDrinkBlue = 0
+      inventory.burkRed = 0
+      inventory.burkBlue = 0
+      inventory.fartCanRed = 0
+      inventory.fartCanBlue = 0
+      farts.length = 0
       resetFighters()
       openWeaponSelect()
     }
@@ -3329,8 +3534,11 @@ function FightingBalls() {
           for (let i = 0; i < pingBalls.length; i += 1) {
             drawPingBall(pingBalls[i])
           }
-          for (let i = 0; i < arrows.length; i += 1) {
+for (let i = 0; i < arrows.length; i += 1) {
             drawArrow(arrows[i])
+          }
+          for (let i = 0; i < farts.length; i += 1) {
+            drawFart(farts[i], shopPausedAt || now)
           }
           for (let i = 0; i < bodyguards.length; i += 1) {
             drawBodyguard(bodyguards[i])
@@ -3360,6 +3568,7 @@ function FightingBalls() {
         updatePingBalls(dt)
         updateArrows(dt)
         updateBodyguards(dt, now)
+        updateFarts(dt, now)
         removeDeadFighters()
         updateSpectators(dt, now)
 
@@ -3379,6 +3588,10 @@ function FightingBalls() {
         // Spectators behind / around (outside ring)
         for (let i = 0; i < spectators.length; i += 1) {
           drawBall(spectators[i], spectatorR, true)
+        }
+
+        for (let i = 0; i < farts.length; i += 1) {
+          drawFart(farts[i], now)
         }
 
         for (let i = shocks.length - 1; i >= 0; i -= 1) {
@@ -3586,6 +3799,13 @@ function FightingBalls() {
         if (player) useLifeDrink(player, 'red')
         return
       }
+if (k === 'f' && !e.repeat) {
+        e.preventDefault()
+        const player = fighters.find((f) => f.player)
+        if (!player) return
+        if (!tryPickupFart(player)) releaseFartFromCan(player)
+        return
+      }
       if ((k === '2' || e.code === 'Digit2' || e.code === 'Numpad2') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
@@ -3596,6 +3816,13 @@ function FightingBalls() {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
         if (blue) useLifeDrink(blue, 'blue')
+        return
+      }
+if ((k === '4' || e.code === 'Digit4' || e.code === 'Numpad4') && !e.repeat) {
+        e.preventDefault()
+        const blue = fighters.find((f) => f.control === 'arrows')
+        if (!blue) return
+        if (!tryPickupFart(blue)) releaseFartFromCan(blue)
         return
       }
     }
