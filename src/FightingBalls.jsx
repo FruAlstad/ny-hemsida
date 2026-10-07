@@ -34,14 +34,31 @@ const SWORD_DAMAGE = 2
 const SWORD_COOLDOWN = 420
 const SWORD_SWING_MS = 280
 const SWORD_REACH = 56
-const BOW_DAMAGE = 2
+const BOW_DAMAGE = 2 // Lv0=2, uppgraderingar → 3,4,5,6,7,8
+const BOW_MAX_LEVEL = 6 // 2 + 6 = 8 dmg
 const BOW_COOLDOWN = 1100
 const BOW_DRAW_MS = 280
 const BOW_ARROW_SPEED = 10
 const BOW_ARROW_RADIUS = 6
+const NOKIA_COST = 100
+const NOKIA_HIT_DAMAGE = 5 // första träffen / explosionen
+const NOKIA_FIRE_DAMAGE = 1 // eld-DoT
+const NOKIA_FIRE_TICK_MS = 500
+const NOKIA_FIRE_DURATION_MS = 5000
+const NOKIA_SPEED = 9
+const NOKIA_RADIUS = 14
+const NOKIA_PROXIMITY = 70 // exploderar nära fiende
+const NOKIA_BLAST = 95
+const NOKIA_FIRE_RADIUS = 88
 const KNIFE_SHOP_COST = KNIFE_COST
 const OTIS_CODE = 'ötis'
 const OTIS_DAMAGE = 100
+const NERMIN_CODE = 'nermin'
+const NERMIN_DAMAGE = 100
+const NERMIN_SCALE = 1.55
+const LIMB_COOLDOWN = 380
+const LIMB_SWING_MS = 300
+const LIMB_REACH = 48
 const FOOT_COST = 10
 const FOOT_DAMAGE = 3
 const FOOT_COOLDOWN = 500
@@ -71,7 +88,12 @@ const BODYGUARD_COST = 5
 const SUS_COST = 10
 const SUS_DAMAGE = 5
 const SUS_TICK_MS = 1000
+const SUS_DURATION_MS = 10000
 const BURK_COST = 10
+const MOGGER_COST = 15
+const MOGGER_DURATION_MS = 15000
+const MOGGER_DAMAGE = 5
+const MOGGER_TICK_MS = 1000
 
 function rollKillCoins() {
   // 65%: 7, 34%: 8, 1%: 30
@@ -145,6 +167,7 @@ function FightingBalls() {
     const arrows = []
     const bodyguards = []
     const farts = []
+    const nokiaFires = []
     let shake = 0
     let flash = 0
     let cheer = 0
@@ -165,6 +188,9 @@ function FightingBalls() {
     let shopPausedAt = 0
     let pendingBossAfterShop = false
     let pendingWinAfterShop = null // 'red' | 'blue' | null
+    let moggerUntil = 0
+    let moggerNextTick = 0
+    let moggerOwner = null // 'red' | 'blue' | null — köparen tar ingen skada
     let shopButton = { x: 0, y: 0, w: 120, h: 42 }
     const shopHits = []
     let weaponSelectOpen = true
@@ -180,21 +206,26 @@ function FightingBalls() {
     let codeUsesLeft = SECRET_CODE_MAX_USES
     let shopFree = false
     let otisPower = false
+    let nerminPower = false
     const inventory = {
-      weaponRed: null, // 'bow' | 'sword' | 'knife' | 'foot'
-      weaponBlue: null, // 'bow' | 'sword' | 'knife' | 'ping'
+      weaponRed: null, // 'bow' | 'sword' | 'knife' | 'foot' | 'nokia'
+      weaponBlue: null, // 'bow' | 'sword' | 'knife' | 'ping' | 'nokia'
       startWeaponRed: null, // 'bow' | 'sword'
       startWeaponBlue: null,
       knifeOwnedRed: false,
       knifeOwnedBlue: false,
       swordLevelRed: 0, // 0=trä … 3=diamant (+ ev. högre dmg)
       swordLevelBlue: 0,
-      bowLevelRed: 0, // pil-nivå
+      bowLevelRed: 0, // pil-nivå 0..6 → dmg 2..8
       bowLevelBlue: 0,
+      nokiaRed: false,
+      nokiaBlue: false,
       footLevel: 0,
       pingLevel: 0,
       lifeDrinkRed: 0,
       lifeDrinkBlue: 0,
+      susRed: 0,
+      susBlue: 0,
       burkRed: 0,
       burkBlue: 0,
       fartCanRed: 0,
@@ -259,6 +290,7 @@ function FightingBalls() {
       arrows.length = 0
       bodyguards.length = 0
       farts.length = 0
+      nokiaFires.length = 0
       fighters.push(
         makeFighter(cx - arenaR * 0.25, cy, 0, 0, 0, true),
         makeFighter(cx + arenaR * 0.25, cy, 0, 0, 1, false),
@@ -555,6 +587,7 @@ arenaR = Math.min(width, height) * 0.78
 
     function getRadius(ball) {
       if (ball && ball.isBoss) return ballR * BOSS_SCALE
+      if (nerminPower && ball && !ball.isBoss) return ballR * NERMIN_SCALE
       return ballR
     }
 
@@ -832,24 +865,30 @@ arenaR = Math.min(width, height) * 0.78
     }
 
     function swordDamageFor(attacker) {
-      if (otisPower) return OTIS_DAMAGE
+      if (nerminPower || otisPower) return NERMIN_DAMAGE
       const side = isRedSide(attacker) ? 'red' : 'blue'
       return materialDamage(SWORD_DAMAGE, materialTierLevel(side, 'sword'))
     }
 
     function bowDamageFor(attacker) {
-      if (otisPower) return OTIS_DAMAGE
+      if (nerminPower || otisPower) return NERMIN_DAMAGE
       const side = isRedSide(attacker) ? 'red' : 'blue'
+      const weapon = getSideWeapon(attacker)
+      if (weapon === 'nokia') return NOKIA_HIT_DAMAGE
       return materialDamage(BOW_DAMAGE, materialTierLevel(side, 'bow'))
     }
 
     function weaponUpgradeCost(baseCost, level) {
-      // level 0 → 5, level 1 → 10, level 2 → 20, level 3 → 40
+      // level 0 → 5, level 1 → 10, level 2 → 20, level 3 → 40 …
       return baseCost * 2 ** Math.max(0, level)
     }
 
     function canUpgradeMaterial(level) {
       return level < MAX_MATERIAL_LEVEL
+    }
+
+    function canUpgradeBow(level) {
+      return level < BOW_MAX_LEVEL
     }
 
     function nextMaterialLabel(level) {
@@ -860,6 +899,11 @@ arenaR = Math.min(width, height) * 0.78
     function materialUpgradeTitle(kind, level) {
       const nowLabel = MATERIAL_LABELS[materialTierName(level)]
       const prefix = kind === 'sword' ? 'Svärd' : 'Pil'
+      if (kind === 'bow') {
+        const dmg = BOW_DAMAGE + Math.max(0, level)
+        if (!canUpgradeBow(level)) return `${prefix} ${dmg} dmg MAX`
+        return `${prefix} ${dmg}→${dmg + 1} dmg`
+      }
       if (!canUpgradeMaterial(level)) return `${prefix} ${nowLabel} MAX`
       if (level >= MATERIAL_TIERS.length - 1) return `${prefix} ${nowLabel} +1 dmg`
       return `${prefix} ${nowLabel}→${nextMaterialLabel(level)}`
@@ -876,9 +920,17 @@ arenaR = Math.min(width, height) * 0.78
     }
 
     function meleeStats(kind, attacker) {
+      if (kind === 'limb' || (nerminPower && (kind === 'sword' || kind === 'knife' || kind === 'foot'))) {
+        return {
+          damage: NERMIN_DAMAGE,
+          cooldown: LIMB_COOLDOWN,
+          swingMs: LIMB_SWING_MS,
+          reach: LIMB_REACH,
+        }
+      }
       if (kind === 'foot') {
         return {
-          damage: footDamage(),
+          damage: nerminPower ? NERMIN_DAMAGE : footDamage(),
           cooldown: FOOT_COOLDOWN,
           swingMs: FOOT_SWING_MS,
           reach: FOOT_REACH,
@@ -893,7 +945,7 @@ arenaR = Math.min(width, height) * 0.78
         }
       }
       return {
-        damage: KNIFE_DAMAGE,
+        damage: nerminPower ? NERMIN_DAMAGE : KNIFE_DAMAGE,
         cooldown: KNIFE_COOLDOWN,
         swingMs: KNIFE_SWING_MS,
         reach: KNIFE_REACH,
@@ -989,29 +1041,166 @@ arenaR = Math.min(width, height) * 0.78
       const ny = Math.sin(angle)
       const side = isRedSide(attacker) ? 'red' : 'blue'
       const level = materialTierLevel(side, 'bow')
-      const dmg = bowDamageFor(attacker)
+      const isNokia = getSideWeapon(attacker) === 'nokia'
+      const dmg = isNokia ? NOKIA_HIT_DAMAGE : bowDamageFor(attacker)
+      const speed = isNokia ? NOKIA_SPEED : BOW_ARROW_SPEED
+      const ar = isNokia ? NOKIA_RADIUS : BOW_ARROW_RADIUS
 
       attacker.knifeReadyAt = now + BOW_COOLDOWN
       attacker.knifeEquipped = true
       attacker.knifeSwingUntil = now + BOW_DRAW_MS
-      attacker.meleeKind = 'bow'
+      attacker.meleeKind = isNokia ? 'nokia' : 'bow'
       attacker.knifeAngle = angle
       attacker.squash = 0.3
       attacker.face = nx >= 0 ? 1 : -1
 
       arrows.push({
-        x: attacker.x + nx * (getRadius(attacker) + BOW_ARROW_RADIUS + 4),
-        y: attacker.y + ny * (getRadius(attacker) + BOW_ARROW_RADIUS + 4),
-        vx: nx * BOW_ARROW_SPEED + attacker.vx * 0.2,
-        vy: ny * BOW_ARROW_SPEED + attacker.vy * 0.2,
-        r: BOW_ARROW_RADIUS,
+        x: attacker.x + nx * (getRadius(attacker) + ar + 4),
+        y: attacker.y + ny * (getRadius(attacker) + ar + 4),
+        vx: nx * speed + attacker.vx * 0.2,
+        vy: ny * speed + attacker.vy * 0.2,
+        r: ar,
         angle,
         life: 2.8,
         owner: attacker,
         damage: dmg,
         level,
+        nokia: isNokia,
       })
       spawnBurst(attacker.x + nx * getRadius(attacker), attacker.y + ny * getRadius(attacker), 0.35)
+    }
+
+    function spawnFireExplosion(x, y) {
+      const fireColors = [
+        [255, 60, 20],
+        [255, 120, 30],
+        [255, 180, 40],
+        [255, 230, 80],
+        [180, 30, 10],
+      ]
+      for (let i = 0; i < 42; i += 1) {
+        const angle = Math.random() * Math.PI * 2
+        const speed = 3 + Math.random() * 14
+        const c = fireColors[i % fireColors.length]
+        particles.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 2 - Math.random() * 4,
+          life: 1,
+          decay: 0.018 + Math.random() * 0.03,
+          size: 4 + Math.random() * 9,
+          color: c,
+          fire: true,
+        })
+      }
+      for (let ring = 0; ring < 3; ring += 1) {
+        shocks.push({
+          x,
+          y,
+          r: 8 + ring * 6,
+          max: 70 + ring * 45,
+          life: 1 - ring * 0.12,
+          color: ring === 0 ? [255, 220, 80] : ring === 1 ? [255, 120, 30] : [255, 50, 10],
+        })
+      }
+    }
+
+    function explodeNokia(a) {
+      const now = performance.now()
+      spawnFireExplosion(a.x, a.y)
+      shake = Math.min(24, shake + 14)
+      flash = Math.min(0.7, flash + 0.4)
+      // Första träffen: 5 skada (aldrig 100)
+      const hitDmg = NOKIA_HIT_DAMAGE
+      for (let j = 0; j < fighters.length; j += 1) {
+        const f = fighters[j]
+        if (f === a.owner || f.eliminated) continue
+        if (bossMode && !f.isBoss) continue
+        const d = Math.hypot(f.x - a.x, f.y - a.y)
+        if (d > NOKIA_BLAST + getRadius(f)) continue
+        const shielded = f.player && now < f.shieldUntil
+        if (!shielded) {
+          f.lives -= hitDmg
+          if (f.isBoss) addBossDamage(a.owner, hitDmg)
+        }
+        f.squash = 0.75
+        const ang = Math.atan2(f.y - a.y, f.x - a.x)
+        f.vx += Math.cos(ang) * 12
+        f.vy += Math.sin(ang) * 12
+      }
+      // Eldzon: 1 skada var 0.5s
+      nokiaFires.push({
+        x: a.x,
+        y: a.y,
+        r: NOKIA_FIRE_RADIUS,
+        owner: a.owner,
+        nextTick: now + NOKIA_FIRE_TICK_MS,
+        expiresAt: now + NOKIA_FIRE_DURATION_MS,
+        wobble: Math.random() * Math.PI * 2,
+      })
+    }
+
+    function updateNokiaFires(dt, now) {
+      for (let i = nokiaFires.length - 1; i >= 0; i -= 1) {
+        const g = nokiaFires[i]
+        if (now >= g.expiresAt) {
+          nokiaFires.splice(i, 1)
+          continue
+        }
+        g.wobble += 0.05 * dt
+        // Små eldpartiklar i zonen
+        if (Math.random() < 0.35) {
+          const ang = Math.random() * Math.PI * 2
+          const dist = Math.random() * g.r * 0.85
+          particles.push({
+            x: g.x + Math.cos(ang) * dist,
+            y: g.y + Math.sin(ang) * dist,
+            vx: (Math.random() - 0.5) * 1.5,
+            vy: -1.5 - Math.random() * 2.5,
+            life: 0.85,
+            decay: 0.04 + Math.random() * 0.03,
+            size: 3 + Math.random() * 5,
+            color: Math.random() > 0.5 ? [255, 140, 30] : [255, 70, 20],
+            fire: true,
+          })
+        }
+        if (now < g.nextTick) continue
+        g.nextTick = now + NOKIA_FIRE_TICK_MS
+        for (let j = 0; j < fighters.length; j += 1) {
+          const f = fighters[j]
+          if (f === g.owner || f.eliminated || f.lives <= 0) continue
+          if (bossMode && !f.isBoss) continue
+          if (Math.hypot(f.x - g.x, f.y - g.y) > g.r + getRadius(f) * 0.2) continue
+          const shielded = f.player && now < f.shieldUntil
+          if (!shielded) {
+            f.lives -= NOKIA_FIRE_DAMAGE
+            if (f.isBoss) addBossDamage(g.owner, NOKIA_FIRE_DAMAGE)
+          }
+          f.squash = Math.max(f.squash, 0.25)
+        }
+      }
+    }
+
+    function drawNokiaFire(g, now = performance.now()) {
+      const lifeLeft = Math.max(0, Math.min(1, (g.expiresAt - now) / NOKIA_FIRE_DURATION_MS))
+      const pulse = 1 + Math.sin(now / 160 + g.wobble) * 0.04
+      const r = g.r * pulse
+      ctx.save()
+      const grad = ctx.createRadialGradient(g.x, g.y, r * 0.1, g.x, g.y, r)
+      grad.addColorStop(0, `rgba(255, 200, 60, ${0.35 + lifeLeft * 0.2})`)
+      grad.addColorStop(0.45, `rgba(255, 100, 20, ${0.28 + lifeLeft * 0.12})`)
+      grad.addColorStop(1, 'rgba(180, 30, 0, 0)')
+      ctx.fillStyle = grad
+      ctx.beginPath()
+      ctx.arc(g.x, g.y, r, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = `rgba(255, 160, 40, ${0.55 + lifeLeft * 0.3})`
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      ctx.arc(g.x, g.y, r, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
     }
 
     function updateArrows(dt) {
@@ -1021,6 +1210,7 @@ arenaR = Math.min(width, height) * 0.78
         a.y += a.vy * dt
         a.life -= dt * 0.02
         if (Math.hypot(a.x - cx, a.y - cy) > arenaR + 50 || a.life <= 0) {
+          if (a.nokia) explodeNokia(a)
           arrows.splice(i, 1)
           continue
         }
@@ -1030,17 +1220,22 @@ arenaR = Math.min(width, height) * 0.78
           if (f === a.owner || f.eliminated) continue
           if (bossMode && !f.isBoss) continue
           const d = Math.hypot(f.x - a.x, f.y - a.y)
-          if (d < getRadius(f) + a.r) {
-            const shielded = f.player && performance.now() < f.shieldUntil
-            if (!shielded) {
-              f.lives -= a.damage
-              if (f.isBoss) addBossDamage(a.owner, a.damage)
+          const prox = a.nokia ? NOKIA_PROXIMITY + getRadius(f) : getRadius(f) + a.r
+          if (d < prox) {
+            if (a.nokia) {
+              explodeNokia(a)
+            } else {
+              const shielded = f.player && performance.now() < f.shieldUntil
+              if (!shielded) {
+                f.lives -= a.damage
+                if (f.isBoss) addBossDamage(a.owner, a.damage)
+              }
+              f.squash = 0.55
+              f.vx += a.vx * 0.18
+              f.vy += a.vy * 0.18
+              spawnBurst(a.x, a.y, 1.0)
+              shake = Math.min(12, shake + 4)
             }
-            f.squash = 0.55
-            f.vx += a.vx * 0.18
-            f.vy += a.vy * 0.18
-            spawnBurst(a.x, a.y, 1.0)
-            shake = Math.min(12, shake + 4)
             hit = true
             break
           }
@@ -1050,6 +1245,38 @@ arenaR = Math.min(width, height) * 0.78
     }
 
     function drawArrow(a) {
+      if (a.nokia) {
+        ctx.save()
+        ctx.translate(a.x, a.y)
+        ctx.rotate(a.angle || 0)
+        // Nokia-telefon
+        const w = a.r * 1.6
+        const h = a.r * 2.6
+        ctx.fillStyle = '#2a2a2a'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(-w * 0.5, -h * 0.5, w, h, 4)
+        else ctx.rect(-w * 0.5, -h * 0.5, w, h)
+        ctx.fill()
+        ctx.fillStyle = '#7ec8ff'
+        ctx.fillRect(-w * 0.32, -h * 0.38, w * 0.64, h * 0.28)
+        ctx.fillStyle = '#444'
+        for (let row = 0; row < 3; row += 1) {
+          for (let col = 0; col < 3; col += 1) {
+            ctx.fillRect(
+              -w * 0.28 + col * w * 0.22,
+              -h * 0.02 + row * h * 0.18,
+              w * 0.16,
+              h * 0.12,
+            )
+          }
+        }
+        ctx.fillStyle = '#666'
+        ctx.beginPath()
+        ctx.arc(0, -h * 0.42, w * 0.08, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+        return
+      }
       const colors = materialColorsFor(a.level || 0)
       ctx.save()
       ctx.translate(a.x, a.y)
@@ -1147,15 +1374,18 @@ arenaR = Math.min(width, height) * 0.78
     function swingMelee(attacker) {
       if (!attacker || attacker.eliminated || attacker.lives <= 0) return
       if (attacker.control !== 'arrows' && attacker.control !== 'wasd') return
-      const kind = getSideWeapon(attacker)
-      if (kind === 'ping') {
+      let kind = getSideWeapon(attacker)
+      // Nermin: ingen kniv — bara armar/ben (båge/nokia får fortfarande skjuta)
+      if (nerminPower && kind !== 'bow' && kind !== 'nokia' && kind !== 'ping') {
+        kind = 'limb'
+      } else if (kind === 'ping') {
         shootPingPong(attacker)
         return
-      }
-      if (kind === 'bow') {
+      } else if (kind === 'bow' || kind === 'nokia') {
         shootBow(attacker)
         return
       }
+      if (nerminPower) kind = 'limb'
       const now = performance.now()
       if (now < (attacker.knifeReadyAt || 0)) return
       const stats = meleeStats(kind, attacker)
@@ -1449,6 +1679,7 @@ arenaR = Math.min(width, height) * 0.78
       pingBalls.length = 0
       bodyguards.length = 0
       farts.length = 0
+      nokiaFires.length = 0
       clearKeys()
       // Behåll poäng/guld — fortsätt mot 30
       resetFighters()
@@ -1466,6 +1697,7 @@ arenaR = Math.min(width, height) * 0.78
       pingBalls.length = 0
       bodyguards.length = 0
       farts.length = 0
+      nokiaFires.length = 0
       fighters.length = 0
       clearKeys()
 
@@ -1637,7 +1869,17 @@ arenaR = Math.min(width, height) * 0.78
         bodyguards[i].expiresAt += ms
         bodyguards[i].nextTick += ms
       }
+      for (let i = 0; i < farts.length; i += 1) {
+        if (farts[i].expiresAt > 0) farts[i].expiresAt += ms
+        if (farts[i].nextTick > 0) farts[i].nextTick += ms
+      }
+      for (let i = 0; i < nokiaFires.length; i += 1) {
+        if (nokiaFires[i].expiresAt > 0) nokiaFires[i].expiresAt += ms
+        if (nokiaFires[i].nextTick > 0) nokiaFires[i].nextTick += ms
+      }
       if (winnerUntil > 0) winnerUntil += ms
+      if (moggerUntil > 0) moggerUntil += ms
+      if (moggerNextTick > 0) moggerNextTick += ms
     }
 
 
@@ -2003,6 +2245,31 @@ arenaR = Math.min(width, height) * 0.78
         flash = Math.min(0.7, flash + 0.4)
         return
       }
+      if (typed === NERMIN_CODE) {
+        nerminPower = true
+        // Ta bort kniv — bara armar/ben
+        inventory.knifeOwnedRed = false
+        inventory.knifeOwnedBlue = false
+        if (inventory.weaponRed === 'knife') {
+          inventory.weaponRed = inventory.startWeaponRed || null
+        }
+        if (inventory.weaponBlue === 'knife') {
+          inventory.weaponBlue = inventory.startWeaponBlue || null
+        }
+        for (let i = 0; i < fighters.length; i += 1) {
+          const f = fighters[i]
+          if (f.meleeKind === 'knife') f.meleeKind = 'limb'
+          if (f.knifeEquipped && f.meleeKind === 'knife') f.knifeEquipped = false
+        }
+        codesMessage = `Nermin! Tjockis · armar/ben · ${NERMIN_DAMAGE} dmg`
+        codesMessageUntil = performance.now() + 3500
+        codesInput = ''
+        spawnBurst(cx, cy, 2.4)
+        triggerCheer()
+        flash = Math.min(0.75, flash + 0.45)
+        shake = Math.min(16, shake + 8)
+        return
+      }
       codesMessage = 'Fel kod'
       codesMessageUntil = performance.now() + 1500
       codesInput = ''
@@ -2083,10 +2350,13 @@ arenaR = Math.min(width, height) * 0.78
       shopHits.length = 0
       if (!shopOpen) return
 
-      const panelW = Math.min(460, width * 0.94)
-const panelH = Math.min(680, height * 0.92)
+      const panelW = Math.min(720, width * 0.94)
+      const panelH = Math.min(520, height * 0.9)
       const px = width * 0.5 - panelW * 0.5
       const py = height * 0.5 - panelH * 0.5
+      const midX = px + panelW * 0.5
+      const colPad = 16
+      const colW = panelW * 0.5 - colPad * 1.5
 
       ctx.save()
       ctx.fillStyle = 'rgba(0,0,0,0.55)'
@@ -2105,49 +2375,23 @@ const panelH = Math.min(680, height * 0.92)
       ctx.font = 'bold 28px Syne, sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'top'
-      ctx.fillText('SHOP', width * 0.5, py + 14)
+      ctx.fillText('SHOP', width * 0.5, py + 12)
 
-      ctx.font = '14px Figtree, sans-serif'
+      ctx.font = '13px Figtree, sans-serif'
       ctx.fillStyle = 'rgba(255,255,255,0.65)'
       ctx.fillText(
         shopFree
-          ? `Röd: ${redCoins} 🪙   Blå: ${blueCoins} 🪙   · GRATIS`
-          : `Röd: ${redCoins} 🪙   Blå: ${blueCoins} 🪙`,
+          ? `Blå: ${blueCoins} 🪙   ·   Röd: ${redCoins} 🪙   · GRATIS`
+          : `Blå: ${blueCoins} 🪙   ·   Röd: ${redCoins} 🪙`,
         width * 0.5,
-        py + 48,
+        py + 44,
       )
 
       const swordCostRed = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.swordLevelRed))
       const swordCostBlue = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.swordLevelBlue))
       const bowCostRed = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelRed))
       const bowCostBlue = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelBlue))
-      const knifeCostRed = inventory.knifeOwnedRed ? 0 : shopPrice(KNIFE_SHOP_COST)
-      const knifeCostBlue = inventory.knifeOwnedBlue ? 0 : shopPrice(KNIFE_SHOP_COST)
-
-      const items = [
-        {
-          id: 'knifeRed',
-          title: inventory.knifeOwnedRed ? 'Kniv (utrustad)' : 'Kniv',
-          desc: `R · Q · ${KNIFE_DAMAGE} dmg`,
-          cost: knifeCostRed,
-          side: 'Röd',
-          owned: inventory.knifeOwnedRed ? 1 : 0,
-          canBuy:
-            inventory.weaponRed !== 'knife' &&
-            (inventory.knifeOwnedRed || redCoins >= knifeCostRed),
-        },
-        {
-          id: 'knifeBlue',
-          title: inventory.knifeOwnedBlue ? 'Kniv (utrustad)' : 'Kniv',
-          desc: `B · 2 · ${KNIFE_DAMAGE} dmg`,
-          cost: knifeCostBlue,
-          side: 'Blå',
-          owned: inventory.knifeOwnedBlue ? 1 : 0,
-          canBuy:
-            inventory.weaponBlue !== 'knife' &&
-            (inventory.knifeOwnedBlue || blueCoins >= knifeCostBlue),
-        },
-      ]
+      const items = []
 
       if (inventory.startWeaponRed === 'sword') {
         items.push({
@@ -2165,13 +2409,13 @@ const panelH = Math.min(680, height * 0.92)
         items.push({
           id: 'bowRed',
           title: materialUpgradeTitle('bow', inventory.bowLevelRed),
-          desc: `R · Q · pil ${bowDamageFor({ player: true })} dmg`,
-          cost: canUpgradeMaterial(inventory.bowLevelRed) ? bowCostRed : 0,
+          desc: `R · Q · pil ${BOW_DAMAGE + inventory.bowLevelRed} dmg`,
+          cost: canUpgradeBow(inventory.bowLevelRed) ? bowCostRed : 0,
           side: 'Röd',
           owned: inventory.bowLevelRed,
           canBuy:
-            (canUpgradeMaterial(inventory.bowLevelRed) && redCoins >= bowCostRed) ||
-            inventory.weaponRed !== 'bow',
+            (canUpgradeBow(inventory.bowLevelRed) && redCoins >= bowCostRed) ||
+            (inventory.weaponRed !== 'bow' && inventory.weaponRed !== 'nokia'),
         })
       }
 
@@ -2191,41 +2435,42 @@ const panelH = Math.min(680, height * 0.92)
         items.push({
           id: 'bowBlue',
           title: materialUpgradeTitle('bow', inventory.bowLevelBlue),
-          desc: `B · 2 · pil ${bowDamageFor({ control: 'arrows' })} dmg`,
-          cost: canUpgradeMaterial(inventory.bowLevelBlue) ? bowCostBlue : 0,
+          desc: `B · 2 · pil ${BOW_DAMAGE + inventory.bowLevelBlue} dmg`,
+          cost: canUpgradeBow(inventory.bowLevelBlue) ? bowCostBlue : 0,
           side: 'Blå',
           owned: inventory.bowLevelBlue,
           canBuy:
-            (canUpgradeMaterial(inventory.bowLevelBlue) && blueCoins >= bowCostBlue) ||
-            inventory.weaponBlue !== 'bow',
+            (canUpgradeBow(inventory.bowLevelBlue) && blueCoins >= bowCostBlue) ||
+            (inventory.weaponBlue !== 'bow' && inventory.weaponBlue !== 'nokia'),
         })
       }
 
       items.push(
         {
-          id: 'footRed',
-          title: inventory.footLevel > 0 ? `Fot Lv${inventory.footLevel}` : 'Fot',
-          desc:
-            inventory.footLevel > 0
-              ? `R · Q · +1 dmg · nu ${footDamage()} → ${footDamage() + 1}`
-              : `R · Q · spark · ${FOOT_DAMAGE} dmg`,
-          cost: shopPrice(weaponUpgradeCost(FOOT_COST, inventory.footLevel)),
+          id: 'nokiaRed',
+          title: inventory.nokiaRed ? 'Nokia (utrustad)' : 'Nokia-pilbåge',
+          desc: `R · Q · träff ${NOKIA_HIT_DAMAGE} · eld ${NOKIA_FIRE_DAMAGE}/0.5s`,
+          cost: inventory.nokiaRed ? 0 : shopPrice(NOKIA_COST),
           side: 'Röd',
-          owned: inventory.footLevel,
-          canBuy: redCoins >= shopPrice(weaponUpgradeCost(FOOT_COST, inventory.footLevel)),
+          owned: inventory.nokiaRed ? 1 : 0,
+          canBuy:
+            inventory.weaponRed !== 'nokia' &&
+            (inventory.nokiaRed || redCoins >= shopPrice(NOKIA_COST)),
         },
         {
-          id: 'pingBlue',
-          title: inventory.pingLevel > 0 ? `Pingis Lv${inventory.pingLevel}` : 'Pingis',
-          desc:
-            inventory.pingLevel > 0
-              ? `B · 2 · +1 dmg · nu ${pingDamage()} → ${pingDamage() + 1}`
-              : `B · 2 · rack + boll · ${PING_DAMAGE} dmg`,
-          cost: shopPrice(weaponUpgradeCost(PING_COST, inventory.pingLevel)),
+          id: 'nokiaBlue',
+          title: inventory.nokiaBlue ? 'Nokia (utrustad)' : 'Nokia-pilbåge',
+          desc: `B · 2 · träff ${NOKIA_HIT_DAMAGE} · eld ${NOKIA_FIRE_DAMAGE}/0.5s`,
+          cost: inventory.nokiaBlue ? 0 : shopPrice(NOKIA_COST),
           side: 'Blå',
-          owned: inventory.pingLevel,
-          canBuy: blueCoins >= shopPrice(weaponUpgradeCost(PING_COST, inventory.pingLevel)),
+          owned: inventory.nokiaBlue ? 1 : 0,
+          canBuy:
+            inventory.weaponBlue !== 'nokia' &&
+            (inventory.nokiaBlue || blueCoins >= shopPrice(NOKIA_COST)),
         },
+      )
+
+      items.push(
         {
           id: 'lifeDrinkRed',
           title: 'Livedryck',
@@ -2265,19 +2510,19 @@ const panelH = Math.min(680, height * 0.92)
         {
           id: 'susRed',
           title: 'Sus',
-          desc: `R · grön prut · ${SUS_DAMAGE}/sek`,
+          desc: `R · R · radie · ${SUS_DAMAGE}/sek · 10s`,
           cost: shopPrice(SUS_COST),
           side: 'Röd',
-          owned: farts.filter((g) => g.owner?.player).length + inventory.fartCanRed,
+          owned: inventory.susRed,
           canBuy: redCoins >= shopPrice(SUS_COST),
         },
         {
           id: 'susBlue',
           title: 'Sus',
-          desc: `B · grön prut · ${SUS_DAMAGE}/sek`,
+          desc: `B · 0 · radie · ${SUS_DAMAGE}/sek · 10s`,
           cost: shopPrice(SUS_COST),
           side: 'Blå',
-          owned: farts.filter((g) => g.owner && !g.owner.player).length + inventory.fartCanBlue,
+          owned: inventory.susBlue,
           canBuy: blueCoins >= shopPrice(SUS_COST),
         },
         {
@@ -2298,51 +2543,94 @@ const panelH = Math.min(680, height * 0.92)
           owned: inventory.burkBlue,
           canBuy: blueCoins >= shopPrice(BURK_COST),
         },
-      ]
+        {
+          id: 'moggerRed',
+          title: 'Moger Face',
+          desc: `R · svart bana · ${MOGGER_DAMAGE}/sek · 15s`,
+          cost: shopPrice(MOGGER_COST),
+          side: 'Röd',
+          owned: moggerUntil > 0 ? 1 : 0,
+          canBuy: redCoins >= shopPrice(MOGGER_COST),
+        },
+        {
+          id: 'moggerBlue',
+          title: 'Moger Face',
+          desc: `B · svart bana · ${MOGGER_DAMAGE}/sek · 15s`,
+          cost: shopPrice(MOGGER_COST),
+          side: 'Blå',
+          owned: moggerUntil > 0 ? 1 : 0,
+          canBuy: blueCoins >= shopPrice(MOGGER_COST),
+        },
+      )
 
-      const startY = py + 78
-      const rowH = 38
-      if (items.length === 0) {
-        ctx.textAlign = 'center'
-        ctx.fillStyle = 'rgba(255,255,255,0.55)'
-        ctx.font = '16px Figtree, sans-serif'
-        ctx.fillText('Inga varor just nu', width * 0.5, startY + 40)
+      const blueItems = items.filter((it) => it.side === 'Blå')
+      const redItems = items.filter((it) => it.side === 'Röd')
+      const startY = py + 88
+      const rowH = 44
+      const btnW = 72
+      const btnH = 28
+
+      // Mittstreck: blå vänster, röd höger
+      ctx.beginPath()
+      ctx.moveTo(midX, py + 72)
+      ctx.lineTo(midX, py + panelH - 48)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)'
+      ctx.lineWidth = 2
+      ctx.stroke()
+
+      ctx.font = 'bold 16px Syne, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.fillStyle = '#5ec8ff'
+      ctx.fillText('BLÅ', px + colPad + colW * 0.5, py + 66)
+      ctx.fillStyle = '#ff6b5a'
+      ctx.fillText('RÖD', midX + colPad + colW * 0.5, py + 66)
+
+      function drawShopColumn(colItems, colX) {
+        if (colItems.length === 0) {
+          ctx.textAlign = 'center'
+          ctx.fillStyle = 'rgba(255,255,255,0.4)'
+          ctx.font = '14px Figtree, sans-serif'
+          ctx.fillText('Inga varor', colX + colW * 0.5, startY + 24)
+          return
+        }
+        colItems.forEach((item, i) => {
+          const y = startY + i * rowH
+          const bx = colX + colW - btnW
+          const by = y + 8
+
+          ctx.textAlign = 'left'
+          ctx.textBaseline = 'top'
+          ctx.fillStyle = '#ffffff'
+          ctx.font = 'bold 14px Figtree, sans-serif'
+          ctx.fillText(item.title, colX, y + 2)
+          ctx.font = '11px Figtree, sans-serif'
+          ctx.fillStyle = 'rgba(255,255,255,0.55)'
+          ctx.fillText(`${item.desc} · äger ${item.owned}`, colX, y + 20)
+
+          const showMax =
+            item.cost === 0 && String(item.title).includes('MAX') && !item.canBuy
+          ctx.fillStyle = showMax ? '#4b5563' : item.canBuy ? '#f0c040' : '#4b5563'
+          ctx.beginPath()
+          if (typeof ctx.roundRect === 'function') ctx.roundRect(bx, by, btnW, btnH, 8)
+          else ctx.rect(bx, by, btnW, btnH)
+          ctx.fill()
+          ctx.fillStyle = item.canBuy && !showMax ? '#2a1c08' : '#9ca3af'
+          ctx.font = 'bold 12px Figtree, sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(
+            showMax ? 'MAX' : item.cost === 0 ? 'GRATIS' : `${item.cost} 🪙`,
+            bx + btnW * 0.5,
+            by + btnH * 0.5,
+          )
+
+          shopHits.push({ x: bx, y: by, w: btnW, h: btnH, id: item.id })
+        })
       }
-      items.forEach((item, i) => {
-        const y = startY + i * rowH
-        const bx = px + panelW - 100
-        const by = y + 4
-        const bw = 80
-        const bh = 30
 
-        ctx.textAlign = 'left'
-        ctx.textBaseline = 'top'
-        ctx.fillStyle = '#ffffff'
-        ctx.font = 'bold 14px Figtree, sans-serif'
-        ctx.fillText(`${item.title} (${item.side})`, px + 20, y + 2)
-        ctx.font = '12px Figtree, sans-serif'
-        ctx.fillStyle = 'rgba(255,255,255,0.55)'
-        ctx.fillText(`${item.desc} · äger ${item.owned}`, px + 20, y + 20)
-
-        const showMax =
-          item.cost === 0 && String(item.title).includes('MAX') && !item.canBuy
-        ctx.fillStyle = showMax ? '#4b5563' : item.canBuy ? '#f0c040' : '#4b5563'
-        ctx.beginPath()
-        if (typeof ctx.roundRect === 'function') ctx.roundRect(bx, by, bw, bh, 8)
-        else ctx.rect(bx, by, bw, bh)
-        ctx.fill()
-        ctx.fillStyle = item.canBuy && !showMax ? '#2a1c08' : '#9ca3af'
-        ctx.font = 'bold 13px Figtree, sans-serif'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(
-          showMax ? 'MAX' : item.cost === 0 ? 'GRATIS' : `${item.cost} 🪙`,
-          bx + bw * 0.5,
-          by + bh * 0.5,
-        )
-
-        shopHits.push({ x: bx, y: by, w: bw, h: bh, id: item.id })
-      })
+      drawShopColumn(blueItems, px + colPad)
+      drawShopColumn(redItems, midX + colPad)
 
       const cxBtn = width * 0.5
       const cyBtn = py + panelH - 28
@@ -2399,30 +2687,48 @@ const panelH = Math.min(680, height * 0.92)
       ctx.restore()
     }
 
+    function startMoggerFace(ownerSide) {
+      const now = shopOpen && shopPausedAt > 0 ? shopPausedAt : performance.now()
+      moggerUntil = now + MOGGER_DURATION_MS
+      moggerNextTick = now + MOGGER_TICK_MS
+      moggerOwner = ownerSide
+      shake = Math.min(16, shake + 8)
+      flash = Math.min(0.5, flash + 0.25)
+    }
+
+    function isMoggerBuyer(fighter) {
+      if (!moggerOwner || !fighter) return false
+      if (moggerOwner === 'red') {
+        return !!(fighter.player || fighter.control === 'wasd' || fighter._bossSide === 'red')
+      }
+      return !!(fighter.control === 'arrows' || fighter._bossSide === 'blue')
+    }
+
+    function updateMogger(now) {
+      if (moggerUntil <= 0) return
+      if (now >= moggerUntil) {
+        moggerUntil = 0
+        moggerNextTick = 0
+        moggerOwner = null
+        spawnBurst(cx, cy, 1.5)
+        return
+      }
+      if (now < moggerNextTick) return
+      moggerNextTick = now + MOGGER_TICK_MS
+      for (let i = 0; i < fighters.length; i += 1) {
+        const f = fighters[i]
+        if (f.eliminated || f.lives <= 0) continue
+        if (isMoggerBuyer(f)) continue
+        const shielded = f.player && now < f.shieldUntil
+        if (!shielded) f.lives -= MOGGER_DAMAGE
+        f.squash = Math.max(f.squash, 0.4)
+        spawnBurst(f.x, f.y, 0.6)
+      }
+      shake = Math.min(12, shake + 3)
+    }
+
     function buyShopItem(id) {
       if (!shopOpen) return
-      if (id === 'knifeRed') {
-        if (inventory.weaponRed === 'knife') return
-        if (!inventory.knifeOwnedRed) {
-          const cost = shopPrice(KNIFE_SHOP_COST)
-          if (redCoins < cost) return
-          redCoins -= cost
-          inventory.knifeOwnedRed = true
-        }
-        inventory.weaponRed = 'knife'
-        return
-      }
-      if (id === 'knifeBlue') {
-        if (inventory.weaponBlue === 'knife') return
-        if (!inventory.knifeOwnedBlue) {
-          const cost = shopPrice(KNIFE_SHOP_COST)
-          if (blueCoins < cost) return
-          blueCoins -= cost
-          inventory.knifeOwnedBlue = true
-        }
-        inventory.weaponBlue = 'knife'
-        return
-      }
       if (id === 'swordRed') {
         if (canUpgradeMaterial(inventory.swordLevelRed)) {
           const price = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.swordLevelRed))
@@ -2452,7 +2758,7 @@ const panelH = Math.min(680, height * 0.92)
         return
       }
       if (id === 'bowRed') {
-        if (canUpgradeMaterial(inventory.bowLevelRed)) {
+        if (canUpgradeBow(inventory.bowLevelRed)) {
           const price = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelRed))
           if (redCoins >= price) {
             redCoins -= price
@@ -2466,7 +2772,7 @@ const panelH = Math.min(680, height * 0.92)
         return
       }
       if (id === 'bowBlue') {
-        if (canUpgradeMaterial(inventory.bowLevelBlue)) {
+        if (canUpgradeBow(inventory.bowLevelBlue)) {
           const price = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelBlue))
           if (blueCoins >= price) {
             blueCoins -= price
@@ -2477,6 +2783,28 @@ const panelH = Math.min(680, height * 0.92)
         }
         if (inventory.weaponBlue === 'bow') return
         inventory.weaponBlue = 'bow'
+        return
+      }
+      if (id === 'nokiaRed') {
+        if (inventory.weaponRed === 'nokia') return
+        if (!inventory.nokiaRed) {
+          const cost = shopPrice(NOKIA_COST)
+          if (redCoins < cost) return
+          redCoins -= cost
+          inventory.nokiaRed = true
+        }
+        inventory.weaponRed = 'nokia'
+        return
+      }
+      if (id === 'nokiaBlue') {
+        if (inventory.weaponBlue === 'nokia') return
+        if (!inventory.nokiaBlue) {
+          const cost = shopPrice(NOKIA_COST)
+          if (blueCoins < cost) return
+          blueCoins -= cost
+          inventory.nokiaBlue = true
+        }
+        inventory.weaponBlue = 'nokia'
         return
       }
       if (id === 'lifeDrinkRed') {
@@ -2517,38 +2845,32 @@ const panelH = Math.min(680, height * 0.92)
         spawnBodyguard(blue, target)
         return
       }
-      if (id === 'footRed') {
-        const price = shopPrice(weaponUpgradeCost(FOOT_COST, inventory.footLevel))
-        if (redCoins < price) return
-        redCoins -= price
-        inventory.weaponRed = 'foot'
-        inventory.footLevel += 1
+      if (id === 'moggerRed') {
+        const cost = shopPrice(MOGGER_COST)
+        if (redCoins < cost) return
+        redCoins -= cost
+        startMoggerFace('red')
         return
       }
-      if (id === 'pingBlue') {
-        const price = shopPrice(weaponUpgradeCost(PING_COST, inventory.pingLevel))
-        if (blueCoins < price) return
-        blueCoins -= price
-        inventory.weaponBlue = 'ping'
-        inventory.pingLevel += 1
+      if (id === 'moggerBlue') {
+        const cost = shopPrice(MOGGER_COST)
+        if (blueCoins < cost) return
+        blueCoins -= cost
+        startMoggerFace('blue')
         return
       }
       if (id === 'susRed') {
         const cost = shopPrice(SUS_COST)
         if (redCoins < cost) return
-        const red = fighters.find((f) => f.player && !f.eliminated)
-        if (!red) return
         redCoins -= cost
-        spawnFart(red)
+        inventory.susRed += 1
         return
       }
       if (id === 'susBlue') {
         const cost = shopPrice(SUS_COST)
         if (blueCoins < cost) return
-        const blue = fighters.find((f) => f.control === 'arrows' && !f.eliminated)
-        if (!blue) return
         blueCoins -= cost
-        spawnFart(blue)
+        inventory.susBlue += 1
         return
       }
       if (id === 'burkRed') {
@@ -2567,9 +2889,10 @@ const panelH = Math.min(680, height * 0.92)
       }
     }
 
-    function fartRadius() {
-      // En fjärdedel av mapens yta → radie ≈ arenaR / 2
-      return arenaR * 0.5
+    function fartRadius(owner) {
+      // 4× spelaren
+      const base = owner ? getRadius(owner) : ballR
+      return base * 4
     }
 
     function isRedSide(fighter) {
@@ -2582,13 +2905,26 @@ const panelH = Math.min(680, height * 0.92)
       farts.push({
         x: owner.x,
         y: owner.y,
-        r: fartRadius(),
+        r: fartRadius(owner),
         owner,
         nextTick: now + SUS_TICK_MS,
+        expiresAt: now + SUS_DURATION_MS,
         wobble: Math.random() * Math.PI * 2,
       })
-      spawnBurst(owner.x, owner.y, 1.2)
       shake = Math.min(10, shake + 3)
+    }
+
+    function useSus(fighter, side) {
+      if (!fighter || fighter.eliminated || fighter.lives <= 0) return false
+      if (side === 'red') {
+        if (inventory.susRed <= 0) return false
+        inventory.susRed -= 1
+      } else {
+        if (inventory.susBlue <= 0) return false
+        inventory.susBlue -= 1
+      }
+      spawnFart(fighter)
+      return true
     }
 
     function tryPickupFart(fighter) {
@@ -2623,8 +2959,12 @@ const panelH = Math.min(680, height * 0.92)
     function updateFarts(dt, now) {
       for (let i = farts.length - 1; i >= 0; i -= 1) {
         const g = farts[i]
-        g.r = fartRadius()
-        g.wobble += 0.04 * dt
+        if (g.expiresAt > 0 && now >= g.expiresAt) {
+          farts.splice(i, 1)
+          continue
+        }
+        g.r = fartRadius(g.owner)
+        g.wobble += 0.03 * dt
 
         // Auto-plocka med burk
         for (let j = 0; j < fighters.length; j += 1) {
@@ -2637,7 +2977,6 @@ const panelH = Math.min(680, height * 0.92)
             farts.splice(i, 1)
             if (red) inventory.fartCanRed += 1
             else inventory.fartCanBlue += 1
-            spawnBurst(f.x, f.y, 0.9)
             break
           }
         }
@@ -2649,34 +2988,42 @@ const panelH = Math.min(680, height * 0.92)
           const f = fighters[j]
           if (f === g.owner || f.eliminated || f.lives <= 0) continue
           if (bossMode && !f.isBoss) continue
-          if (Math.hypot(f.x - g.x, f.y - g.y) > g.r) continue
+          // Skada om motståndaren är inne i den gröna radien
+          if (Math.hypot(f.x - g.x, f.y - g.y) > g.r + getRadius(f) * 0.25) continue
           const shielded = f.player && now < f.shieldUntil
           if (!shielded) {
             f.lives -= SUS_DAMAGE
             if (f.isBoss) addBossDamage(g.owner, SUS_DAMAGE)
           }
-          f.squash = Math.max(f.squash, 0.35)
-          spawnBurst(f.x, f.y, 0.55)
+          f.squash = Math.max(f.squash, 0.4)
         }
       }
     }
 
     function drawFart(g, now = performance.now()) {
-      const pulse = 1 + Math.sin((now / 220) + g.wobble) * 0.04
+      const lifeLeft =
+        g.expiresAt > 0 ? Math.max(0, Math.min(1, (g.expiresAt - now) / SUS_DURATION_MS)) : 1
+      const pulse = 1 + Math.sin(now / 280 + g.wobble) * 0.02
       const r = g.r * pulse
       ctx.save()
-      const grad = ctx.createRadialGradient(g.x, g.y, r * 0.15, g.x, g.y, r)
-      grad.addColorStop(0, 'rgba(80, 220, 90, 0.45)')
-      grad.addColorStop(0.55, 'rgba(40, 160, 70, 0.28)')
-      grad.addColorStop(1, 'rgba(20, 90, 40, 0)')
-      ctx.fillStyle = grad
+      // Fast grön skadezon (radie), inte bara en liten effekt
+      ctx.fillStyle = `rgba(40, 200, 70, ${0.28 + lifeLeft * 0.12})`
       ctx.beginPath()
       ctx.arc(g.x, g.y, r, 0, Math.PI * 2)
       ctx.fill()
-      ctx.strokeStyle = 'rgba(120, 255, 140, 0.35)'
+      ctx.fillStyle = `rgba(70, 230, 100, ${0.18 + lifeLeft * 0.1})`
+      ctx.beginPath()
+      ctx.arc(g.x, g.y, r * 0.55, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = `rgba(120, 255, 140, ${0.85 + lifeLeft * 0.1})`
+      ctx.lineWidth = 5
+      ctx.beginPath()
+      ctx.arc(g.x, g.y, r, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.strokeStyle = 'rgba(200, 255, 210, 0.45)'
       ctx.lineWidth = 2
       ctx.beginPath()
-      ctx.arc(g.x, g.y, r * 0.92, 0, Math.PI * 2)
+      ctx.arc(g.x, g.y, r * 0.72, 0, Math.PI * 2)
       ctx.stroke()
       ctx.restore()
     }
@@ -2857,6 +3204,9 @@ const panelH = Math.min(680, height * 0.92)
       codesOpen = false
       pendingBossAfterShop = false
       pendingWinAfterShop = null
+      moggerUntil = 0
+      moggerNextTick = 0
+      moggerOwner = null
       bombs.length = 0
       pingBalls.length = 0
       arrows.length = 0
@@ -2873,13 +3223,20 @@ const panelH = Math.min(680, height * 0.92)
       inventory.bowLevelBlue = 0
       inventory.footLevel = 0
       inventory.pingLevel = 0
+      inventory.nokiaRed = false
+      inventory.nokiaBlue = false
       inventory.lifeDrinkRed = 0
       inventory.lifeDrinkBlue = 0
+      inventory.susRed = 0
+      inventory.susBlue = 0
       inventory.burkRed = 0
       inventory.burkBlue = 0
       inventory.fartCanRed = 0
       inventory.fartCanBlue = 0
+      otisPower = false
+      nerminPower = false
       farts.length = 0
+      nokiaFires.length = 0
       resetFighters()
       openWeaponSelect()
     }
@@ -2900,16 +3257,19 @@ const panelH = Math.min(680, height * 0.92)
       ctx.fillText(`×${redCoins}`, 48, 98)
 
       const redW = inventory.weaponRed
-      const redLabel =
-        redW === 'bow'
+      const redLabel = nerminPower
+        ? 'Armar/ben · Q'
+        : redW === 'bow'
           ? 'Pilbåge · Q'
           : redW === 'sword'
             ? 'Svärd · Q'
-            : redW === 'knife'
-              ? 'Kniv · Q'
-              : redW === 'foot'
-                ? 'Fot · Q'
-                : ''
+            : redW === 'nokia'
+              ? 'Nokia · Q'
+              : redW === 'knife'
+                ? 'Kniv · Q'
+                : redW === 'foot'
+                  ? 'Fot · Q'
+                  : ''
       if (redLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
         ctx.fillStyle = 'rgba(255,255,255,0.7)'
@@ -2930,16 +3290,19 @@ const panelH = Math.min(680, height * 0.92)
       ctx.fillText(`×${blueCoins}`, width - 48, 98)
 
       const blueW = inventory.weaponBlue
-      const blueLabel =
-        blueW === 'bow'
+      const blueLabel = nerminPower
+        ? 'Armar/ben · 2'
+        : blueW === 'bow'
           ? 'Pilbåge · 2'
           : blueW === 'sword'
             ? 'Svärd · 2'
-            : blueW === 'knife'
-              ? 'Kniv · 2'
-              : blueW === 'ping'
-                ? 'Pingis · 2'
-                : ''
+            : blueW === 'nokia'
+              ? 'Nokia · 2'
+              : blueW === 'knife'
+                ? 'Kniv · 2'
+                : blueW === 'ping'
+                  ? 'Pingis · 2'
+                  : ''
       if (blueLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
         ctx.fillStyle = 'rgba(255,255,255,0.7)'
@@ -2970,6 +3333,25 @@ const panelH = Math.min(680, height * 0.92)
     }
 
     function drawArena(time) {
+      const moggerActive = moggerUntil > 0 && time < moggerUntil
+      if (moggerActive) {
+        ctx.fillStyle = '#000000'
+        ctx.fillRect(0, 0, width, height)
+        // Svart void-bana: bara en tunn ring så man ser kanten
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)'
+        ctx.lineWidth = 3
+        ctx.beginPath()
+        ctx.arc(cx, cy, Math.max(1, arenaR), 0, Math.PI * 2)
+        ctx.stroke()
+        const leftSec = Math.max(0, Math.ceil((moggerUntil - time) / 1000))
+        ctx.fillStyle = 'rgba(255,255,255,0.55)'
+        ctx.font = 'bold 22px Syne, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'top'
+        ctx.fillText(`MOGER FACE · ${leftSec}s`, cx, cy - arenaR - 36)
+        return
+      }
+
       ctx.fillStyle = '#07060a'
       ctx.fillRect(0, 0, width, height)
 
@@ -3199,21 +3581,130 @@ const panelH = Math.min(680, height * 0.92)
       }
       ctx.stroke()
 
-      // Fot / pingis / båge / svärd syns alltid; kniv bara under sving
+      // Moger Face: glasögon + kindlinjer på köparen
+      if (
+        !happy &&
+        !ball.isBoss &&
+        moggerUntil > 0 &&
+        performance.now() < moggerUntil &&
+        isMoggerBuyer(ball)
+      ) {
+        const gY = eyeY
+        const gW = r * 0.34
+        const gH = r * 0.26
+        const gGap = eyeSpread
+
+        // Glasögonbågar
+        ctx.strokeStyle = 'rgba(15, 12, 20, 0.95)'
+        ctx.lineWidth = Math.max(2.5, r * 0.085)
+        ctx.lineJoin = 'round'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(-gGap - gW * 0.5, gY - gH * 0.5, gW, gH, r * 0.06)
+          ctx.roundRect(gGap - gW * 0.5, gY - gH * 0.5, gW, gH, r * 0.06)
+        } else {
+          ctx.rect(-gGap - gW * 0.5, gY - gH * 0.5, gW, gH)
+          ctx.rect(gGap - gW * 0.5, gY - gH * 0.5, gW, gH)
+        }
+        ctx.stroke()
+
+        // Näsa / brygga
+        ctx.beginPath()
+        ctx.moveTo(-gGap + gW * 0.5, gY)
+        ctx.lineTo(gGap - gW * 0.5, gY)
+        ctx.stroke()
+
+        // Glasglans
+        ctx.fillStyle = 'rgba(180, 220, 255, 0.18)'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(-gGap - gW * 0.42, gY - gH * 0.38, gW * 0.84, gH * 0.76, r * 0.04)
+          ctx.roundRect(gGap - gW * 0.42, gY - gH * 0.38, gW * 0.84, gH * 0.76, r * 0.04)
+        } else {
+          ctx.rect(-gGap - gW * 0.42, gY - gH * 0.38, gW * 0.84, gH * 0.76)
+          ctx.rect(gGap - gW * 0.42, gY - gH * 0.38, gW * 0.84, gH * 0.76)
+        }
+        ctx.fill()
+
+        // Kindben-linjer
+        ctx.strokeStyle = 'rgba(20, 12, 28, 0.75)'
+        ctx.lineWidth = Math.max(2, r * 0.07)
+        ctx.lineCap = 'round'
+        ctx.beginPath()
+        ctx.moveTo(-r * 0.55, r * 0.08)
+        ctx.quadraticCurveTo(-r * 0.42, r * 0.28, -r * 0.22, r * 0.22)
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.moveTo(r * 0.55, r * 0.08)
+        ctx.quadraticCurveTo(r * 0.42, r * 0.28, r * 0.22, r * 0.22)
+        ctx.stroke()
+        // Extra kindkontur
+        ctx.strokeStyle = 'rgba(20, 12, 28, 0.45)'
+        ctx.lineWidth = Math.max(1.5, r * 0.045)
+        ctx.beginPath()
+        ctx.moveTo(-r * 0.48, r * 0.18)
+        ctx.quadraticCurveTo(-r * 0.38, r * 0.38, -r * 0.18, r * 0.36)
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.moveTo(r * 0.48, r * 0.18)
+        ctx.quadraticCurveTo(r * 0.38, r * 0.38, r * 0.18, r * 0.36)
+        ctx.stroke()
+      }
+
+      // Nermin-tjockis: armar + ben
+      if (nerminPower && !happy && !ball.isBoss) {
+        const nowL = performance.now()
+        const limbSwing =
+          ball.meleeKind === 'limb' && ball.knifeSwingUntil && nowL < ball.knifeSwingUntil
+        const limbT = limbSwing
+          ? 1 - Math.max(0, (ball.knifeSwingUntil - nowL) / LIMB_SWING_MS)
+          : 0
+        const punch = limbSwing ? Math.sin(limbT * Math.PI) * 0.9 : 0
+        ctx.fillStyle = color
+        ctx.strokeStyle = 'rgba(20,12,28,0.55)'
+        ctx.lineWidth = Math.max(2, r * 0.06)
+        // Ben
+        ctx.beginPath()
+        ctx.moveTo(-r * 0.28, r * 0.55)
+        ctx.lineTo(-r * 0.38, r * 1.15)
+        ctx.moveTo(r * 0.28, r * 0.55)
+        ctx.lineTo(r * 0.38, r * 1.15)
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.ellipse(-r * 0.4, r * 1.2, r * 0.22, r * 0.12, -0.2, 0, Math.PI * 2)
+        ctx.ellipse(r * 0.4, r * 1.2, r * 0.22, r * 0.12, 0.2, 0, Math.PI * 2)
+        ctx.fill()
+        // Armar
+        ctx.beginPath()
+        ctx.moveTo(-r * 0.75, -r * 0.05)
+        ctx.lineTo(-r * (1.15 + punch * 0.35), r * (0.35 - punch * 0.2))
+        ctx.moveTo(r * 0.75, -r * 0.05)
+        ctx.lineTo(r * (1.15 + punch * 0.55), r * (0.2 - punch * 0.45))
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.arc(-r * (1.15 + punch * 0.35), r * (0.35 - punch * 0.2), r * 0.16, 0, Math.PI * 2)
+        ctx.arc(r * (1.15 + punch * 0.55), r * (0.2 - punch * 0.45), r * 0.16, 0, Math.PI * 2)
+        ctx.fill()
+      }
+
+      // Fot / pingis / båge / svärd syns alltid; kniv bara under sving (aldrig under Nermin)
       {
         const weapon = happy || ball.isBoss ? null : getSideWeapon(ball)
         const now = performance.now()
         const swinging =
           !!(ball.knifeEquipped || (ball.knifeSwingUntil && now < ball.knifeSwingUntil))
-        const kind = swinging ? ball.meleeKind || weapon || 'knife' : weapon
+        let kind = swinging ? ball.meleeKind || weapon || 'knife' : weapon
+        if (nerminPower && (kind === 'knife' || kind === 'sword')) kind = 'limb'
         const showHeld =
-          kind === 'foot' ||
-          kind === 'ping' ||
-          kind === 'bow' ||
-          kind === 'sword' ||
-          (swinging && kind === 'knife')
+          !nerminPower &&
+          (kind === 'foot' ||
+            kind === 'ping' ||
+            kind === 'bow' ||
+            kind === 'nokia' ||
+            kind === 'sword' ||
+            (swinging && kind === 'knife'))
 
-        if (showHeld && kind) {
+        if (showHeld && kind && kind !== 'limb') {
           const side = isRedSide(ball) ? 'red' : 'blue'
           const matLevel =
             kind === 'sword'
@@ -3227,7 +3718,7 @@ const panelH = Math.min(680, height * 0.92)
               ? FOOT_SWING_MS
               : kind === 'ping'
                 ? 180
-                : kind === 'bow'
+                : kind === 'bow' || kind === 'nokia'
                   ? BOW_DRAW_MS
                   : kind === 'sword'
                     ? SWORD_SWING_MS
@@ -3235,21 +3726,47 @@ const panelH = Math.min(680, height * 0.92)
           const swingLeft = swinging ? Math.max(0, (ball.knifeSwingUntil || 0) - now) : swingMs
           const swingT = swinging ? 1 - swingLeft / swingMs : 0
           const faceAngle =
-            typeof ball.knifeAngle === 'number' && (swinging || kind === 'ping' || kind === 'bow')
+            typeof ball.knifeAngle === 'number' &&
+            (swinging || kind === 'ping' || kind === 'bow' || kind === 'nokia')
               ? ball.knifeAngle
               : (ball.face || 1) > 0
                 ? 0
                 : Math.PI
           const swingArc = swinging
             ? Math.sin(swingT * Math.PI) *
-              (kind === 'foot' ? 0.9 : kind === 'ping' || kind === 'bow' ? 0.2 : 1.1)
+              (kind === 'foot' ? 0.9 : kind === 'ping' || kind === 'bow' || kind === 'nokia' ? 0.2 : 1.1)
             : 0
-          const dir = faceAngle + swingArc - (swinging && kind !== 'ping' && kind !== 'bow' ? 0.55 : 0)
+          const dir =
+            faceAngle +
+            swingArc -
+            (swinging && kind !== 'ping' && kind !== 'bow' && kind !== 'nokia' ? 0.55 : 0)
 
           ctx.save()
           ctx.rotate(dir)
 
-          if (kind === 'foot') {
+          if (kind === 'nokia') {
+            ctx.translate(r * 0.7, 0)
+            const w = r * 0.55
+            const h = r * 0.95
+            ctx.fillStyle = '#222'
+            ctx.beginPath()
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(-w * 0.5, -h * 0.5, w, h, 3)
+            else ctx.rect(-w * 0.5, -h * 0.5, w, h)
+            ctx.fill()
+            ctx.fillStyle = '#7ec8ff'
+            ctx.fillRect(-w * 0.32, -h * 0.38, w * 0.64, h * 0.25)
+            ctx.fillStyle = '#555'
+            for (let row = 0; row < 3; row += 1) {
+              for (let col = 0; col < 3; col += 1) {
+                ctx.fillRect(
+                  -w * 0.28 + col * w * 0.22,
+                  -h * 0.02 + row * h * 0.16,
+                  w * 0.16,
+                  h * 0.1,
+                )
+              }
+            }
+          } else if (kind === 'foot') {
             // Sparkfot
             ctx.translate(r * 0.85, r * 0.15)
             const idleTilt = swinging ? 0 : 0.25
@@ -3384,7 +3901,14 @@ const panelH = Math.min(680, height * 0.92)
             ctx.fillRect(-r * 0.1, -r * 0.16, r * 0.07, r * 0.32)
           }
 
-          if (swinging && kind !== 'ping' && kind !== 'bow' && swingT > 0.05 && swingT < 0.95) {
+          if (
+            swinging &&
+            kind !== 'ping' &&
+            kind !== 'bow' &&
+            kind !== 'nokia' &&
+            swingT > 0.05 &&
+            swingT < 0.95
+          ) {
             ctx.strokeStyle = `rgba(220,240,255,${0.55 * Math.sin(swingT * Math.PI)})`
             ctx.lineWidth = 3
             ctx.beginPath()
@@ -3540,6 +4064,9 @@ for (let i = 0; i < arrows.length; i += 1) {
           for (let i = 0; i < farts.length; i += 1) {
             drawFart(farts[i], shopPausedAt || now)
           }
+          for (let i = 0; i < nokiaFires.length; i += 1) {
+            drawNokiaFire(nokiaFires[i], shopPausedAt || now)
+          }
           for (let i = 0; i < bodyguards.length; i += 1) {
             drawBodyguard(bodyguards[i])
           }
@@ -3569,6 +4096,8 @@ for (let i = 0; i < arrows.length; i += 1) {
         updateArrows(dt)
         updateBodyguards(dt, now)
         updateFarts(dt, now)
+        updateNokiaFires(dt, now)
+        updateMogger(now)
         removeDeadFighters()
         updateSpectators(dt, now)
 
@@ -3585,13 +4114,18 @@ for (let i = 0; i < arrows.length; i += 1) {
         ctx.translate(ox, oy)
         drawArena(now)
 
-        // Spectators behind / around (outside ring)
-        for (let i = 0; i < spectators.length; i += 1) {
-          drawBall(spectators[i], spectatorR, true)
+        // Spectators behind / around (outside ring) — gömda i Moger Face
+        if (!(moggerUntil > 0 && now < moggerUntil)) {
+          for (let i = 0; i < spectators.length; i += 1) {
+            drawBall(spectators[i], spectatorR, true)
+          }
         }
 
         for (let i = 0; i < farts.length; i += 1) {
           drawFart(farts[i], now)
+        }
+        for (let i = 0; i < nokiaFires.length; i += 1) {
+          drawNokiaFire(nokiaFires[i], now)
         }
 
         for (let i = shocks.length - 1; i >= 0; i -= 1) {
@@ -3602,25 +4136,40 @@ for (let i = 0; i < arrows.length; i += 1) {
             shocks.splice(i, 1)
             continue
           }
+          const sc = s.color || [255, 244, 196]
           ctx.beginPath()
           ctx.arc(s.x, s.y, Math.max(0.5, s.r), 0, Math.PI * 2)
-          ctx.strokeStyle = `rgba(255,244,196,${s.life * 0.75})`
-          ctx.lineWidth = Math.max(1, 3 * s.life)
+          ctx.strokeStyle = `rgba(${sc[0]},${sc[1]},${sc[2]},${s.life * 0.8})`
+          ctx.lineWidth = Math.max(2, (s.color ? 5 : 3) * s.life)
           ctx.stroke()
+          if (s.color) {
+            ctx.beginPath()
+            ctx.arc(s.x, s.y, Math.max(0.5, s.r * 0.55), 0, Math.PI * 2)
+            ctx.strokeStyle = `rgba(255, 200, 60, ${s.life * 0.35})`
+            ctx.lineWidth = Math.max(1, 2 * s.life)
+            ctx.stroke()
+          }
         }
 
         for (let i = particles.length - 1; i >= 0; i -= 1) {
           const p = particles[i]
           p.x += p.vx * dt
           p.y += p.vy * dt
-          p.vx *= 0.97
-          p.vy *= 0.97
+          if (p.fire) {
+            p.vy -= 0.18 * dt
+            p.vx *= 0.96
+            p.vy *= 0.98
+          } else {
+            p.vx *= 0.97
+            p.vy *= 0.97
+          }
           p.life -= p.decay * dt
           if (p.life <= 0) {
             particles.splice(i, 1)
             continue
           }
-          ctx.fillStyle = `rgba(255,244,196,${p.life})`
+          const pc = p.color || [255, 244, 196]
+          ctx.fillStyle = `rgba(${pc[0]},${pc[1]},${pc[2]},${p.life})`
           ctx.beginPath()
           ctx.arc(p.x, p.y, Math.max(0.5, p.size * p.life), 0, Math.PI * 2)
           ctx.fill()
@@ -3741,7 +4290,13 @@ for (let i = 0; i < arrows.length; i += 1) {
           if (/^[0-9a-zåäö]$/i.test(ch)) {
             codesInput += ch
             const typed = codesInput.toLowerCase()
-            if (typed === SECRET_CODE || typed === OTIS_CODE) submitCode()
+            if (
+              typed === SECRET_CODE ||
+              typed === OTIS_CODE ||
+              typed === NERMIN_CODE
+            ) {
+              submitCode()
+            }
           }
         }
         return
@@ -3796,10 +4351,12 @@ for (let i = 0; i < arrows.length; i += 1) {
       if (k === 'r' && !e.repeat) {
         e.preventDefault()
         const player = fighters.find((f) => f.player)
-        if (player) useLifeDrink(player, 'red')
+        if (!player) return
+        // R = Sus först, annars livedryck
+        if (!useSus(player, 'red')) useLifeDrink(player, 'red')
         return
       }
-if (k === 'f' && !e.repeat) {
+      if (k === 'f' && !e.repeat) {
         e.preventDefault()
         const player = fighters.find((f) => f.player)
         if (!player) return
@@ -3818,11 +4375,17 @@ if (k === 'f' && !e.repeat) {
         if (blue) useLifeDrink(blue, 'blue')
         return
       }
-if ((k === '4' || e.code === 'Digit4' || e.code === 'Numpad4') && !e.repeat) {
+      if ((k === '4' || e.code === 'Digit4' || e.code === 'Numpad4') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
         if (!blue) return
         if (!tryPickupFart(blue)) releaseFartFromCan(blue)
+        return
+      }
+      if ((k === '0' || e.code === 'Digit0' || e.code === 'Numpad0') && !e.repeat) {
+        e.preventDefault()
+        const blue = fighters.find((f) => f.control === 'arrows')
+        if (blue) useSus(blue, 'blue')
         return
       }
     }
