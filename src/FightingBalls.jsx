@@ -56,6 +56,14 @@ const OTIS_DAMAGE = 100
 const NERMIN_CODE = 'nermin'
 const NERMIN_DAMAGE = 100
 const NERMIN_SCALE = 1.55
+const ALI_CODE = 'ali'
+const RPG_DAMAGE = 20
+const RPG_SPEED = 8
+const RPG_RADIUS = 12
+const RPG_PROXIMITY = 75
+const RPG_BLAST = 110
+const RPG_COOLDOWN = 1400
+const RPG_DRAW_MS = 320
 const LIMB_COOLDOWN = 380
 const LIMB_SWING_MS = 300
 const LIMB_REACH = 48
@@ -113,7 +121,7 @@ const RESPAWN_LIVES = 10
 const RESPAWN_LIVES_BLUE = 10
 const RESPAWN_COUNTDOWN_MS = 3000
 const WIN_SCORE = 100
-const BOSS_SCORE = 15
+const BOSS_SCORE = 10
 const SHOP_MILESTONE_START = 10
 const SHOP_MILESTONE_STEP = 5
 const SHOP_MILESTONE_MAX = 100
@@ -208,8 +216,8 @@ function FightingBalls() {
     let otisPower = false
     let nerminPower = false
     const inventory = {
-      weaponRed: null, // 'bow' | 'sword' | 'knife' | 'foot' | 'nokia'
-      weaponBlue: null, // 'bow' | 'sword' | 'knife' | 'ping' | 'nokia'
+      weaponRed: null, // 'bow' | 'sword' | 'knife' | 'foot' | 'nokia' | 'rpg'
+      weaponBlue: null, // 'bow' | 'sword' | 'knife' | 'ping' | 'nokia' | 'rpg'
       startWeaponRed: null, // 'bow' | 'sword'
       startWeaponBlue: null,
       knifeOwnedRed: false,
@@ -220,6 +228,8 @@ function FightingBalls() {
       bowLevelBlue: 0,
       nokiaRed: false,
       nokiaBlue: false,
+      rpgRed: false,
+      rpgBlue: false,
       footLevel: 0,
       pingLevel: 0,
       lifeDrinkRed: 0,
@@ -1141,6 +1151,63 @@ arenaR = Math.min(width, height) * 0.78
       })
     }
 
+    function shootRpg(attacker) {
+      if (!attacker || attacker.eliminated || attacker.lives <= 0) return
+      if (attacker.control !== 'arrows' && attacker.control !== 'wasd') return
+      const now = performance.now()
+      if (now < (attacker.knifeReadyAt || 0)) return
+
+      const angle = aimAtOpponent(attacker)
+      const nx = Math.cos(angle)
+      const ny = Math.sin(angle)
+
+      attacker.knifeReadyAt = now + RPG_COOLDOWN
+      attacker.knifeEquipped = true
+      attacker.knifeSwingUntil = now + RPG_DRAW_MS
+      attacker.meleeKind = 'rpg'
+      attacker.knifeAngle = angle
+      attacker.squash = 0.35
+      attacker.face = nx >= 0 ? 1 : -1
+
+      arrows.push({
+        x: attacker.x + nx * (getRadius(attacker) + RPG_RADIUS + 6),
+        y: attacker.y + ny * (getRadius(attacker) + RPG_RADIUS + 6),
+        vx: nx * RPG_SPEED + attacker.vx * 0.15,
+        vy: ny * RPG_SPEED + attacker.vy * 0.15,
+        r: RPG_RADIUS,
+        angle,
+        life: 3.2,
+        owner: attacker,
+        damage: RPG_DAMAGE,
+        level: 0,
+        rpg: true,
+      })
+      spawnBurst(attacker.x + nx * getRadius(attacker), attacker.y + ny * getRadius(attacker), 0.5)
+    }
+
+    function explodeRpg(a) {
+      spawnFireExplosion(a.x, a.y)
+      spawnBurst(a.x, a.y, 3)
+      shake = Math.min(26, shake + 16)
+      flash = Math.min(0.75, flash + 0.45)
+      for (let j = 0; j < fighters.length; j += 1) {
+        const f = fighters[j]
+        if (f === a.owner || f.eliminated) continue
+        if (bossMode && !f.isBoss) continue
+        const d = Math.hypot(f.x - a.x, f.y - a.y)
+        if (d > RPG_BLAST + getRadius(f)) continue
+        const shielded = f.player && performance.now() < f.shieldUntil
+        if (!shielded) {
+          f.lives -= a.damage
+          if (f.isBoss) addBossDamage(a.owner, a.damage)
+        }
+        f.squash = 0.8
+        const ang = Math.atan2(f.y - a.y, f.x - a.x)
+        f.vx += Math.cos(ang) * 14
+        f.vy += Math.sin(ang) * 14
+      }
+    }
+
     function updateNokiaFires(dt, now) {
       for (let i = nokiaFires.length - 1; i >= 0; i -= 1) {
         const g = nokiaFires[i]
@@ -1211,8 +1278,23 @@ arenaR = Math.min(width, height) * 0.78
         a.life -= dt * 0.02
         if (Math.hypot(a.x - cx, a.y - cy) > arenaR + 50 || a.life <= 0) {
           if (a.nokia) explodeNokia(a)
+          else if (a.rpg) explodeRpg(a)
           arrows.splice(i, 1)
           continue
+        }
+        // RPG-rökspår
+        if (a.rpg && Math.random() < 0.5) {
+          particles.push({
+            x: a.x - Math.cos(a.angle || 0) * a.r,
+            y: a.y - Math.sin(a.angle || 0) * a.r,
+            vx: (Math.random() - 0.5) * 1.2,
+            vy: (Math.random() - 0.5) * 1.2 - 0.5,
+            life: 0.7,
+            decay: 0.05,
+            size: 3 + Math.random() * 4,
+            color: [180, 180, 180],
+            fire: false,
+          })
         }
         let hit = false
         for (let j = 0; j < fighters.length; j += 1) {
@@ -1220,10 +1302,16 @@ arenaR = Math.min(width, height) * 0.78
           if (f === a.owner || f.eliminated) continue
           if (bossMode && !f.isBoss) continue
           const d = Math.hypot(f.x - a.x, f.y - a.y)
-          const prox = a.nokia ? NOKIA_PROXIMITY + getRadius(f) : getRadius(f) + a.r
+          const prox = a.nokia
+            ? NOKIA_PROXIMITY + getRadius(f)
+            : a.rpg
+              ? RPG_PROXIMITY + getRadius(f)
+              : getRadius(f) + a.r
           if (d < prox) {
             if (a.nokia) {
               explodeNokia(a)
+            } else if (a.rpg) {
+              explodeRpg(a)
             } else {
               const shielded = f.player && performance.now() < f.shieldUntil
               if (!shielded) {
@@ -1245,6 +1333,39 @@ arenaR = Math.min(width, height) * 0.78
     }
 
     function drawArrow(a) {
+      if (a.rpg) {
+        ctx.save()
+        ctx.translate(a.x, a.y)
+        ctx.rotate(a.angle || 0)
+        // RPG-raket
+        ctx.fillStyle = '#4a5a3a'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(-a.r * 2.2, -a.r * 0.45, a.r * 3.4, a.r * 0.9, 3)
+        } else {
+          ctx.rect(-a.r * 2.2, -a.r * 0.45, a.r * 3.4, a.r * 0.9)
+        }
+        ctx.fill()
+        ctx.fillStyle = '#c0392b'
+        ctx.beginPath()
+        ctx.moveTo(a.r * 1.2, 0)
+        ctx.lineTo(a.r * 0.2, -a.r * 0.55)
+        ctx.lineTo(a.r * 0.2, a.r * 0.55)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = '#f0c040'
+        ctx.fillRect(-a.r * 2.2, -a.r * 0.35, a.r * 0.55, a.r * 0.7)
+        // Eld bak
+        ctx.fillStyle = 'rgba(255, 140, 40, 0.85)'
+        ctx.beginPath()
+        ctx.moveTo(-a.r * 2.2, -a.r * 0.25)
+        ctx.lineTo(-a.r * 3.1, 0)
+        ctx.lineTo(-a.r * 2.2, a.r * 0.25)
+        ctx.closePath()
+        ctx.fill()
+        ctx.restore()
+        return
+      }
       if (a.nokia) {
         ctx.save()
         ctx.translate(a.x, a.y)
@@ -1375,11 +1496,14 @@ arenaR = Math.min(width, height) * 0.78
       if (!attacker || attacker.eliminated || attacker.lives <= 0) return
       if (attacker.control !== 'arrows' && attacker.control !== 'wasd') return
       let kind = getSideWeapon(attacker)
-      // Nermin: ingen kniv — bara armar/ben (båge/nokia får fortfarande skjuta)
-      if (nerminPower && kind !== 'bow' && kind !== 'nokia' && kind !== 'ping') {
+      // Nermin: ingen kniv — bara armar/ben (båge/nokia/rpg får fortfarande skjuta)
+      if (nerminPower && kind !== 'bow' && kind !== 'nokia' && kind !== 'rpg' && kind !== 'ping') {
         kind = 'limb'
       } else if (kind === 'ping') {
         shootPingPong(attacker)
+        return
+      } else if (kind === 'rpg') {
+        shootRpg(attacker)
         return
       } else if (kind === 'bow' || kind === 'nokia') {
         shootBow(attacker)
@@ -2268,6 +2392,20 @@ arenaR = Math.min(width, height) * 0.78
         triggerCheer()
         flash = Math.min(0.75, flash + 0.45)
         shake = Math.min(16, shake + 8)
+        return
+      }
+      if (typed === ALI_CODE) {
+        inventory.rpgRed = true
+        inventory.rpgBlue = true
+        inventory.weaponRed = 'rpg'
+        inventory.weaponBlue = 'rpg'
+        codesMessage = `Ali! RPG · ${RPG_DAMAGE} dmg · exploderar nära`
+        codesMessageUntil = performance.now() + 3500
+        codesInput = ''
+        spawnBurst(cx, cy, 2.2)
+        triggerCheer()
+        flash = Math.min(0.7, flash + 0.35)
+        shake = Math.min(14, shake + 6)
         return
       }
       codesMessage = 'Fel kod'
@@ -3225,6 +3363,8 @@ arenaR = Math.min(width, height) * 0.78
       inventory.pingLevel = 0
       inventory.nokiaRed = false
       inventory.nokiaBlue = false
+      inventory.rpgRed = false
+      inventory.rpgBlue = false
       inventory.lifeDrinkRed = 0
       inventory.lifeDrinkBlue = 0
       inventory.susRed = 0
@@ -3257,19 +3397,21 @@ arenaR = Math.min(width, height) * 0.78
       ctx.fillText(`×${redCoins}`, 48, 98)
 
       const redW = inventory.weaponRed
-      const redLabel = nerminPower
+      const redLabel = nerminPower && redW !== 'rpg' && redW !== 'bow' && redW !== 'nokia'
         ? 'Armar/ben · Q'
-        : redW === 'bow'
-          ? 'Pilbåge · Q'
-          : redW === 'sword'
-            ? 'Svärd · Q'
-            : redW === 'nokia'
-              ? 'Nokia · Q'
-              : redW === 'knife'
-                ? 'Kniv · Q'
-                : redW === 'foot'
-                  ? 'Fot · Q'
-                  : ''
+        : redW === 'rpg'
+          ? 'RPG · Q'
+          : redW === 'bow'
+            ? 'Pilbåge · Q'
+            : redW === 'sword'
+              ? 'Svärd · Q'
+              : redW === 'nokia'
+                ? 'Nokia · Q'
+                : redW === 'knife'
+                  ? 'Kniv · Q'
+                  : redW === 'foot'
+                    ? 'Fot · Q'
+                    : ''
       if (redLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
         ctx.fillStyle = 'rgba(255,255,255,0.7)'
@@ -3290,19 +3432,21 @@ arenaR = Math.min(width, height) * 0.78
       ctx.fillText(`×${blueCoins}`, width - 48, 98)
 
       const blueW = inventory.weaponBlue
-      const blueLabel = nerminPower
+      const blueLabel = nerminPower && blueW !== 'rpg' && blueW !== 'bow' && blueW !== 'nokia'
         ? 'Armar/ben · 2'
-        : blueW === 'bow'
-          ? 'Pilbåge · 2'
-          : blueW === 'sword'
-            ? 'Svärd · 2'
-            : blueW === 'nokia'
-              ? 'Nokia · 2'
-              : blueW === 'knife'
-                ? 'Kniv · 2'
-                : blueW === 'ping'
-                  ? 'Pingis · 2'
-                  : ''
+        : blueW === 'rpg'
+          ? 'RPG · 2'
+          : blueW === 'bow'
+            ? 'Pilbåge · 2'
+            : blueW === 'sword'
+              ? 'Svärd · 2'
+              : blueW === 'nokia'
+                ? 'Nokia · 2'
+                : blueW === 'knife'
+                  ? 'Kniv · 2'
+                  : blueW === 'ping'
+                    ? 'Pingis · 2'
+                    : ''
       if (blueLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
         ctx.fillStyle = 'rgba(255,255,255,0.7)'
@@ -3696,11 +3840,12 @@ arenaR = Math.min(width, height) * 0.78
         let kind = swinging ? ball.meleeKind || weapon || 'knife' : weapon
         if (nerminPower && (kind === 'knife' || kind === 'sword')) kind = 'limb'
         const showHeld =
-          !nerminPower &&
+          (!nerminPower || kind === 'rpg' || kind === 'bow' || kind === 'nokia') &&
           (kind === 'foot' ||
             kind === 'ping' ||
             kind === 'bow' ||
             kind === 'nokia' ||
+            kind === 'rpg' ||
             kind === 'sword' ||
             (swinging && kind === 'knife'))
 
@@ -3718,33 +3863,68 @@ arenaR = Math.min(width, height) * 0.78
               ? FOOT_SWING_MS
               : kind === 'ping'
                 ? 180
-                : kind === 'bow' || kind === 'nokia'
-                  ? BOW_DRAW_MS
-                  : kind === 'sword'
-                    ? SWORD_SWING_MS
-                    : KNIFE_SWING_MS
+                : kind === 'rpg'
+                  ? RPG_DRAW_MS
+                  : kind === 'bow' || kind === 'nokia'
+                    ? BOW_DRAW_MS
+                    : kind === 'sword'
+                      ? SWORD_SWING_MS
+                      : KNIFE_SWING_MS
           const swingLeft = swinging ? Math.max(0, (ball.knifeSwingUntil || 0) - now) : swingMs
           const swingT = swinging ? 1 - swingLeft / swingMs : 0
           const faceAngle =
             typeof ball.knifeAngle === 'number' &&
-            (swinging || kind === 'ping' || kind === 'bow' || kind === 'nokia')
+            (swinging || kind === 'ping' || kind === 'bow' || kind === 'nokia' || kind === 'rpg')
               ? ball.knifeAngle
               : (ball.face || 1) > 0
                 ? 0
                 : Math.PI
           const swingArc = swinging
             ? Math.sin(swingT * Math.PI) *
-              (kind === 'foot' ? 0.9 : kind === 'ping' || kind === 'bow' || kind === 'nokia' ? 0.2 : 1.1)
+              (kind === 'foot'
+                ? 0.9
+                : kind === 'ping' || kind === 'bow' || kind === 'nokia' || kind === 'rpg'
+                  ? 0.2
+                  : 1.1)
             : 0
           const dir =
             faceAngle +
             swingArc -
-            (swinging && kind !== 'ping' && kind !== 'bow' && kind !== 'nokia' ? 0.55 : 0)
+            (swinging &&
+            kind !== 'ping' &&
+            kind !== 'bow' &&
+            kind !== 'nokia' &&
+            kind !== 'rpg'
+              ? 0.55
+              : 0)
 
           ctx.save()
           ctx.rotate(dir)
 
-          if (kind === 'nokia') {
+          if (kind === 'rpg') {
+            ctx.translate(r * 0.75, 0)
+            ctx.fillStyle = '#4a5a3a'
+            ctx.beginPath()
+            if (typeof ctx.roundRect === 'function') {
+              ctx.roundRect(0, -r * 0.16, r * 1.15, r * 0.32, 3)
+            } else {
+              ctx.rect(0, -r * 0.16, r * 1.15, r * 0.32)
+            }
+            ctx.fill()
+            ctx.fillStyle = '#c0392b'
+            ctx.beginPath()
+            ctx.moveTo(r * 1.15, 0)
+            ctx.lineTo(r * 0.85, -r * 0.22)
+            ctx.lineTo(r * 0.85, r * 0.22)
+            ctx.closePath()
+            ctx.fill()
+            ctx.fillStyle = '#3d2314'
+            ctx.fillRect(-r * 0.35, -r * 0.12, r * 0.4, r * 0.24)
+            ctx.fillStyle = '#888'
+            ctx.beginPath()
+            ctx.arc(-r * 0.15, 0, r * 0.14, 0, Math.PI * 2)
+            ctx.fill()
+          } else if (kind === 'nokia') {
             ctx.translate(r * 0.7, 0)
             const w = r * 0.55
             const h = r * 0.95
@@ -3906,6 +4086,7 @@ arenaR = Math.min(width, height) * 0.78
             kind !== 'ping' &&
             kind !== 'bow' &&
             kind !== 'nokia' &&
+            kind !== 'rpg' &&
             swingT > 0.05 &&
             swingT < 0.95
           ) {
@@ -4293,7 +4474,8 @@ for (let i = 0; i < arrows.length; i += 1) {
             if (
               typed === SECRET_CODE ||
               typed === OTIS_CODE ||
-              typed === NERMIN_CODE
+              typed === NERMIN_CODE ||
+              typed === ALI_CODE
             ) {
               submitCode()
             }
