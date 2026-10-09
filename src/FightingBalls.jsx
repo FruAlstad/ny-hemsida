@@ -42,14 +42,27 @@ const BOW_ARROW_SPEED = 10
 const BOW_ARROW_RADIUS = 6
 const NOKIA_COST = 100
 const NOKIA_HIT_DAMAGE = 5 // första träffen / explosionen
-const NOKIA_FIRE_DAMAGE = 1 // eld-DoT
+const NOKIA_FIRE_DAMAGE = 1 // eld-DoT på spelaren
 const NOKIA_FIRE_TICK_MS = 500
 const NOKIA_FIRE_DURATION_MS = 5000
 const NOKIA_SPEED = 9
 const NOKIA_RADIUS = 14
 const NOKIA_PROXIMITY = 70 // exploderar nära fiende
 const NOKIA_BLAST = 95
-const NOKIA_FIRE_RADIUS = 88
+const NOKIA_DIAL_CODE = '112'
+const POLICE_REWARD = 9999
+const POLICE_SPEED = 10
+const POLICE_RADIUS = 26
+const POLICE_CATCH = 42
+const KIDNAP_ESCAPE_MS = 10000
+const PISTOL_DAMAGE = 4 // Lv0=4, uppgraderingar → 5,6,7,8
+const PISTOL_MAX_LEVEL = 4
+const PISTOL_COST = 20
+const PISTOL_COOLDOWN = 320
+const PISTOL_DRAW_MS = 160
+const PISTOL_SPEED = 16
+const PISTOL_RADIUS = 4
+const PISTOL_RPG_COST = 50
 const KNIFE_SHOP_COST = KNIFE_COST
 const OTIS_CODE = 'ötis'
 const OTIS_DAMAGE = 100
@@ -57,7 +70,10 @@ const NERMIN_CODE = 'nermin'
 const NERMIN_DAMAGE = 100
 const NERMIN_SCALE = 1.55
 const ALI_CODE = 'ali'
-const RPG_DAMAGE = 20
+const RPG_DAMAGE = 3 // träffskada
+const RPG_FIRE_DAMAGE = 13 // eld per sekund
+const RPG_FIRE_TICK_MS = 1000
+const RPG_FIRE_DURATION_MS = 2100 // ~2 sek → 2 ticks à 13
 const RPG_SPEED = 8
 const RPG_RADIUS = 12
 const RPG_PROXIMITY = 75
@@ -97,11 +113,17 @@ const SUS_COST = 10
 const SUS_DAMAGE = 5
 const SUS_TICK_MS = 1000
 const SUS_DURATION_MS = 10000
-const BURK_COST = 10
 const MOGGER_COST = 15
 const MOGGER_DURATION_MS = 15000
 const MOGGER_DAMAGE = 5
 const MOGGER_TICK_MS = 1000
+const CAR_COST = 35
+const CAR_ESCAPE_MS = 6000
+const CAR_DURATION_MS = 20000
+const CAR_DAMAGE = 6
+const CAR_HIT_COOLDOWN = 550
+const CAR_MAX_SPEED = 12
+const CAR_SCALE = 1.4
 
 function rollKillCoins() {
   // 65%: 7, 34%: 8, 1%: 30
@@ -175,7 +197,7 @@ function FightingBalls() {
     const arrows = []
     const bodyguards = []
     const farts = []
-    const nokiaFires = []
+    const policeUnits = []
     let shake = 0
     let flash = 0
     let cheer = 0
@@ -215,9 +237,17 @@ function FightingBalls() {
     let shopFree = false
     let otisPower = false
     let nerminPower = false
+    let nokiaDialOpen = false
+    let nokiaDialSide = null // 'red' | 'blue'
+    let nokiaDialInput = ''
+    let nokiaDialMessage = ''
+    let nokiaDialMessageUntil = 0
+    let nokiaDialButtonRed = { x: 0, y: 0, w: 88, h: 34 }
+    let nokiaDialButtonBlue = { x: 0, y: 0, w: 88, h: 34 }
+    const nokiaDialHits = []
     const inventory = {
-      weaponRed: null, // 'bow' | 'sword' | 'knife' | 'foot' | 'nokia' | 'rpg'
-      weaponBlue: null, // 'bow' | 'sword' | 'knife' | 'ping' | 'nokia' | 'rpg'
+      weaponRed: null, // 'bow' | 'sword' | 'knife' | 'foot' | 'nokia' | 'pistol' | 'rpg'
+      weaponBlue: null, // 'bow' | 'sword' | 'knife' | 'ping' | 'nokia' | 'pistol' | 'rpg'
       startWeaponRed: null, // 'bow' | 'sword'
       startWeaponBlue: null,
       knifeOwnedRed: false,
@@ -228,6 +258,10 @@ function FightingBalls() {
       bowLevelBlue: 0,
       nokiaRed: false,
       nokiaBlue: false,
+      pistolRed: false,
+      pistolBlue: false,
+      pistolLevelRed: 0, // 0..4 → dmg 4..8
+      pistolLevelBlue: 0,
       rpgRed: false,
       rpgBlue: false,
       footLevel: 0,
@@ -236,10 +270,8 @@ function FightingBalls() {
       lifeDrinkBlue: 0,
       susRed: 0,
       susBlue: 0,
-      burkRed: 0,
-      burkBlue: 0,
-      fartCanRed: 0,
-      fartCanBlue: 0,
+      carRed: 0,
+      carBlue: 0,
     }
 
     const fighters = []
@@ -290,6 +322,19 @@ function FightingBalls() {
         spearDidHit: false,
         eliminated: false,
         respawnAt: 0,
+        burnUntil: 0,
+        burnNextTick: 0,
+        burnOwner: null,
+        burnDamage: NOKIA_FIRE_DAMAGE,
+        burnTickMs: NOKIA_FIRE_TICK_MS,
+        kidnapped: false,
+        kidnapUntil: 0,
+        escaping: false,
+        escapeUntil: 0,
+        inCar: false,
+        carUntil: 0,
+        carHitUntil: 0,
+        carAngle: 0,
       }
     }
 
@@ -300,7 +345,7 @@ function FightingBalls() {
       arrows.length = 0
       bodyguards.length = 0
       farts.length = 0
-      nokiaFires.length = 0
+      policeUnits.length = 0
       fighters.push(
         makeFighter(cx - arenaR * 0.25, cy, 0, 0, 0, true),
         makeFighter(cx + arenaR * 0.25, cy, 0, 0, 1, false),
@@ -597,11 +642,14 @@ arenaR = Math.min(width, height) * 0.78
 
     function getRadius(ball) {
       if (ball && ball.isBoss) return ballR * BOSS_SCALE
-      if (nerminPower && ball && !ball.isBoss) return ballR * NERMIN_SCALE
-      return ballR
+      let r = ballR
+      if (nerminPower && ball && !ball.isBoss) r *= NERMIN_SCALE
+      if (ball && ball.inCar) r *= CAR_SCALE
+      return r
     }
 
     function keepInArena(ball) {
+      if (ball && ball.escaping) return
       const r = getRadius(ball)
       const limit = Math.max(16, arenaR - r - 6)
       const dx = ball.x - cx
@@ -620,6 +668,40 @@ arenaR = Math.min(width, height) * 0.78
         ball.vy -= hit * 1.8 * ny
       }
       ball.squash = 0.4
+    }
+
+    function startCarEscape(fighter) {
+      if (!fighter || fighter.eliminated || fighter.escaping) return
+      const now = shopOpen && shopPausedAt > 0 ? shopPausedAt : performance.now()
+      fighter.escaping = true
+      fighter.escapeUntil = now + CAR_ESCAPE_MS
+      fighter.inCar = false
+      fighter.carUntil = 0
+      const ang = Math.atan2(fighter.y - cy, fighter.x - cx) || 0
+      fighter.carAngle = ang
+      fighter.vx = Math.cos(ang) * 8
+      fighter.vy = Math.sin(ang) * 8
+      spawnBurst(fighter.x, fighter.y, 1.2)
+      shake = Math.min(12, shake + 4)
+    }
+
+    function finishCarEscape(fighter) {
+      if (!fighter) return
+      const now = performance.now()
+      fighter.escaping = false
+      fighter.escapeUntil = 0
+      const ang = Math.random() * Math.PI * 2
+      fighter.x = cx + Math.cos(ang) * (arenaR * 0.45)
+      fighter.y = cy + Math.sin(ang) * (arenaR * 0.45)
+      fighter.vx = 0
+      fighter.vy = 0
+      fighter.inCar = true
+      fighter.carUntil = now + CAR_DURATION_MS
+      fighter.carAngle = ang + Math.PI
+      keepInArena(fighter)
+      spawnBurst(fighter.x, fighter.y, 1.8)
+      shake = Math.min(14, shake + 6)
+      triggerCheer()
     }
 
     function nearestOther(ball) {
@@ -643,10 +725,52 @@ arenaR = Math.min(width, height) * 0.78
       if (ball.eliminated) {
         ball.vx = 0
         ball.vy = 0
+        ball.escaping = false
+        ball.inCar = false
+        return
+      }
+      if (ball.kidnapped) {
+        ball.vx = 0
+        ball.vy = 0
+        ball.squash *= 0.86
         return
       }
 
-      const accel = 0.52 * dt
+      // Escape → tillbaka med bil efter 6s
+      if (ball.escaping) {
+        if (now >= ball.escapeUntil) {
+          finishCarEscape(ball)
+          return
+        }
+        const ang = Math.atan2(ball.y - cy, ball.x - cx) || ball.carAngle || 0
+        ball.carAngle = ang
+        ball.vx += Math.cos(ang) * 0.9 * dt
+        ball.vy += Math.sin(ang) * 0.9 * dt
+        const sp = Math.hypot(ball.vx, ball.vy)
+        if (sp > CAR_MAX_SPEED) {
+          ball.vx = (ball.vx / sp) * CAR_MAX_SPEED
+          ball.vy = (ball.vy / sp) * CAR_MAX_SPEED
+        }
+        ball.x += ball.vx * dt
+        ball.y += ball.vy * dt
+        // Håll dig utanför arenan under Escape
+        const outDist = Math.hypot(ball.x - cx, ball.y - cy)
+        if (outDist < arenaR + 40) {
+          ball.x = cx + Math.cos(ang) * (arenaR + 50)
+          ball.y = cy + Math.sin(ang) * (arenaR + 50)
+        }
+        ball.squash *= 0.86
+        return
+      }
+
+      if (ball.inCar && ball.carUntil > 0 && now >= ball.carUntil) {
+        ball.inCar = false
+        ball.carUntil = 0
+        spawnBurst(ball.x, ball.y, 0.8)
+      }
+
+      const carBoost = ball.inCar ? 1.55 : 1
+      const accel = 0.52 * carBoost * dt
       let steered = false
 
       if (ball.control === 'wasd') {
@@ -664,8 +788,8 @@ arenaR = Math.min(width, height) * 0.78
       }
 
       if (steered) {
-        ball.vx *= 0.92
-        ball.vy *= 0.92
+        ball.vx *= ball.inCar ? 0.94 : 0.92
+        ball.vy *= ball.inCar ? 0.94 : 0.92
 
         const other = nearestOther(ball)
         if (other) {
@@ -676,7 +800,8 @@ arenaR = Math.min(width, height) * 0.78
         }
 
         const speed = Math.hypot(ball.vx, ball.vy)
-        const max = 7.5
+        if (speed > 0.4) ball.carAngle = Math.atan2(ball.vy, ball.vx)
+        const max = ball.inCar ? CAR_MAX_SPEED : 7.5
         if (speed > max) {
           ball.vx = (ball.vx / speed) * max
           ball.vy = (ball.vy / speed) * max
@@ -1051,7 +1176,8 @@ arenaR = Math.min(width, height) * 0.78
       const ny = Math.sin(angle)
       const side = isRedSide(attacker) ? 'red' : 'blue'
       const level = materialTierLevel(side, 'bow')
-      const isNokia = getSideWeapon(attacker) === 'nokia'
+      const weapon = getSideWeapon(attacker)
+      const isNokia = weapon === 'nokia'
       const dmg = isNokia ? NOKIA_HIT_DAMAGE : bowDamageFor(attacker)
       const speed = isNokia ? NOKIA_SPEED : BOW_ARROW_SPEED
       const ar = isNokia ? NOKIA_RADIUS : BOW_ARROW_RADIUS
@@ -1078,6 +1204,51 @@ arenaR = Math.min(width, height) * 0.78
         nokia: isNokia,
       })
       spawnBurst(attacker.x + nx * getRadius(attacker), attacker.y + ny * getRadius(attacker), 0.35)
+    }
+
+    function pistolDamageFor(attacker) {
+      const side = isRedSide(attacker) ? 'red' : 'blue'
+      const level = side === 'red' ? inventory.pistolLevelRed : inventory.pistolLevelBlue
+      return PISTOL_DAMAGE + Math.max(0, level)
+    }
+
+    function canUpgradePistol(level) {
+      return level < PISTOL_MAX_LEVEL
+    }
+
+    function shootPistol(attacker) {
+      if (!attacker || attacker.eliminated || attacker.lives <= 0) return
+      if (attacker.control !== 'arrows' && attacker.control !== 'wasd') return
+      const now = performance.now()
+      if (now < (attacker.knifeReadyAt || 0)) return
+
+      const angle = aimAtOpponent(attacker)
+      const nx = Math.cos(angle)
+      const ny = Math.sin(angle)
+      const dmg = pistolDamageFor(attacker)
+
+      attacker.knifeReadyAt = now + PISTOL_COOLDOWN
+      attacker.knifeEquipped = true
+      attacker.knifeSwingUntil = now + PISTOL_DRAW_MS
+      attacker.meleeKind = 'pistol'
+      attacker.knifeAngle = angle
+      attacker.squash = 0.25
+      attacker.face = nx >= 0 ? 1 : -1
+
+      arrows.push({
+        x: attacker.x + nx * (getRadius(attacker) + PISTOL_RADIUS + 6),
+        y: attacker.y + ny * (getRadius(attacker) + PISTOL_RADIUS + 6),
+        vx: nx * PISTOL_SPEED + attacker.vx * 0.15,
+        vy: ny * PISTOL_SPEED + attacker.vy * 0.15,
+        r: PISTOL_RADIUS,
+        angle,
+        life: 2.2,
+        owner: attacker,
+        damage: dmg,
+        level: 0,
+        pistol: true,
+      })
+      spawnBurst(attacker.x + nx * getRadius(attacker), attacker.y + ny * getRadius(attacker), 0.25)
     }
 
     function spawnFireExplosion(x, y) {
@@ -1116,12 +1287,24 @@ arenaR = Math.min(width, height) * 0.78
       }
     }
 
+    function applyBurn(target, owner, now, opts = {}) {
+      if (!target || target.eliminated) return
+      const duration = opts.durationMs ?? NOKIA_FIRE_DURATION_MS
+      const tickMs = opts.tickMs ?? NOKIA_FIRE_TICK_MS
+      const damage = opts.damage ?? NOKIA_FIRE_DAMAGE
+      target.burnUntil = now + duration
+      target.burnNextTick = now + tickMs
+      target.burnOwner = owner
+      target.burnDamage = damage
+      target.burnTickMs = tickMs
+    }
+
     function explodeNokia(a) {
       const now = performance.now()
       spawnFireExplosion(a.x, a.y)
       shake = Math.min(24, shake + 14)
       flash = Math.min(0.7, flash + 0.4)
-      // Första träffen: 5 skada (aldrig 100)
+      // Första träffen: 5 skada, sedan brinner spelaren (inte marken)
       const hitDmg = NOKIA_HIT_DAMAGE
       for (let j = 0; j < fighters.length; j += 1) {
         const f = fighters[j]
@@ -1134,21 +1317,51 @@ arenaR = Math.min(width, height) * 0.78
           f.lives -= hitDmg
           if (f.isBoss) addBossDamage(a.owner, hitDmg)
         }
+        applyBurn(f, a.owner, now)
         f.squash = 0.75
         const ang = Math.atan2(f.y - a.y, f.x - a.x)
         f.vx += Math.cos(ang) * 12
         f.vy += Math.sin(ang) * 12
       }
-      // Eldzon: 1 skada var 0.5s
-      nokiaFires.push({
-        x: a.x,
-        y: a.y,
-        r: NOKIA_FIRE_RADIUS,
-        owner: a.owner,
-        nextTick: now + NOKIA_FIRE_TICK_MS,
-        expiresAt: now + NOKIA_FIRE_DURATION_MS,
-        wobble: Math.random() * Math.PI * 2,
-      })
+    }
+
+    function updateBurns(dt, now) {
+      for (let i = 0; i < fighters.length; i += 1) {
+        const f = fighters[i]
+        if (!f.burnUntil || f.eliminated || f.lives <= 0) continue
+        if (now >= f.burnUntil) {
+          f.burnUntil = 0
+          f.burnNextTick = 0
+          f.burnOwner = null
+          f.burnDamage = NOKIA_FIRE_DAMAGE
+          f.burnTickMs = NOKIA_FIRE_TICK_MS
+          continue
+        }
+        // Eldpartiklar på spelaren
+        if (Math.random() < 0.45) {
+          particles.push({
+            x: f.x + (Math.random() - 0.5) * getRadius(f),
+            y: f.y + (Math.random() - 0.5) * getRadius(f),
+            vx: (Math.random() - 0.5) * 1.2,
+            vy: -2 - Math.random() * 3,
+            life: 0.8,
+            decay: 0.045,
+            size: 3 + Math.random() * 5,
+            color: Math.random() > 0.5 ? [255, 140, 30] : [255, 60, 15],
+            fire: true,
+          })
+        }
+        if (now < f.burnNextTick) continue
+        const tickMs = f.burnTickMs || NOKIA_FIRE_TICK_MS
+        const dmg = f.burnDamage || NOKIA_FIRE_DAMAGE
+        f.burnNextTick = now + tickMs
+        const shielded = f.player && now < f.shieldUntil
+        if (!shielded) {
+          f.lives -= dmg
+          if (f.isBoss) addBossDamage(f.burnOwner, dmg)
+        }
+        f.squash = Math.max(f.squash, 0.3)
+      }
     }
 
     function shootRpg(attacker) {
@@ -1186,21 +1399,29 @@ arenaR = Math.min(width, height) * 0.78
     }
 
     function explodeRpg(a) {
+      const now = performance.now()
       spawnFireExplosion(a.x, a.y)
       spawnBurst(a.x, a.y, 3)
       shake = Math.min(26, shake + 16)
       flash = Math.min(0.75, flash + 0.45)
+      const hitDmg = a.damage || RPG_DAMAGE
       for (let j = 0; j < fighters.length; j += 1) {
         const f = fighters[j]
         if (f === a.owner || f.eliminated) continue
         if (bossMode && !f.isBoss) continue
         const d = Math.hypot(f.x - a.x, f.y - a.y)
         if (d > RPG_BLAST + getRadius(f)) continue
-        const shielded = f.player && performance.now() < f.shieldUntil
+        const shielded = f.player && now < f.shieldUntil
         if (!shielded) {
-          f.lives -= a.damage
-          if (f.isBoss) addBossDamage(a.owner, a.damage)
+          f.lives -= hitDmg
+          if (f.isBoss) addBossDamage(a.owner, hitDmg)
         }
+        // Eld: 13 skada / sekund i 2 sekunder
+        applyBurn(f, a.owner, now, {
+          damage: RPG_FIRE_DAMAGE,
+          tickMs: RPG_FIRE_TICK_MS,
+          durationMs: RPG_FIRE_DURATION_MS,
+        })
         f.squash = 0.8
         const ang = Math.atan2(f.y - a.y, f.x - a.x)
         f.vx += Math.cos(ang) * 14
@@ -1208,65 +1429,314 @@ arenaR = Math.min(width, height) * 0.78
       }
     }
 
-    function updateNokiaFires(dt, now) {
-      for (let i = nokiaFires.length - 1; i >= 0; i -= 1) {
-        const g = nokiaFires[i]
-        if (now >= g.expiresAt) {
-          nokiaFires.splice(i, 1)
+    function openNokiaDial(side) {
+      if (nokiaDialOpen || shopOpen || codesOpen || weaponSelectOpen || winner) return
+      if (side === 'red' && !inventory.nokiaRed) return
+      if (side === 'blue' && !inventory.nokiaBlue) return
+      clearKeys()
+      nokiaDialSide = side
+      nokiaDialInput = ''
+      nokiaDialMessage = ''
+      nokiaDialOpen = true
+    }
+
+    function closeNokiaDial() {
+      nokiaDialOpen = false
+      nokiaDialSide = null
+      nokiaDialInput = ''
+    }
+
+    function spawnPolice(ownerSide) {
+      const owner =
+        ownerSide === 'red'
+          ? fighters.find((f) => f.player && !f.eliminated)
+          : fighters.find((f) => f.control === 'arrows' && !f.eliminated)
+      const target = bossMode
+        ? fighters.find((f) => f.isBoss && !f.eliminated)
+        : fighters.find((f) => f !== owner && !f.eliminated && !f.isBoss)
+      if (!owner || !target) {
+        nokiaDialMessage = 'Ingen att kidnappa'
+        nokiaDialMessageUntil = performance.now() + 2000
+        return false
+      }
+      const ang = Math.random() * Math.PI * 2
+      policeUnits.push({
+        x: cx + Math.cos(ang) * (arenaR * 0.85),
+        y: cy + Math.sin(ang) * (arenaR * 0.85),
+        vx: 0,
+        vy: 0,
+        r: POLICE_RADIUS,
+        owner,
+        ownerSide,
+        target,
+        phase: 'chase',
+        rewarded: false,
+      })
+      spawnBurst(owner.x, owner.y, 1.2)
+      triggerCheer()
+      return true
+    }
+
+    function submitNokiaDial() {
+      const typed = nokiaDialInput.trim()
+      if (typed === NOKIA_DIAL_CODE) {
+        if (spawnPolice(nokiaDialSide)) {
+          nokiaDialMessage = `112! Polis ute · +${POLICE_REWARD} 🪙`
+          nokiaDialMessageUntil = performance.now() + 2500
+          if (nokiaDialSide === 'red') redCoins += POLICE_REWARD
+          else blueCoins += POLICE_REWARD
+          nokiaDialInput = ''
+          closeNokiaDial()
+        } else {
+          nokiaDialInput = ''
+        }
+        return
+      }
+      nokiaDialMessage = 'Fel nummer'
+      nokiaDialMessageUntil = performance.now() + 1500
+      nokiaDialInput = ''
+    }
+
+    function givePistol(fighter) {
+      if (!fighter) return
+      if (isRedSide(fighter)) {
+        inventory.pistolRed = true
+        inventory.weaponRed = 'pistol'
+      } else {
+        inventory.pistolBlue = true
+        inventory.weaponBlue = 'pistol'
+      }
+    }
+
+    function releaseKidnap(p) {
+      const target = p.target
+      if (!target) return
+      target.kidnapped = false
+      target.kidnapUntil = 0
+      const ang = Math.atan2(target.y - cy, target.x - cx) || 0
+      target.x = cx + Math.cos(ang) * (arenaR * 0.72)
+      target.y = cy + Math.sin(ang) * (arenaR * 0.72)
+      target.vx = -Math.cos(ang) * 4
+      target.vy = -Math.sin(ang) * 4
+      keepInArena(target)
+      givePistol(target)
+      spawnBurst(target.x, target.y, 1.6)
+      shake = Math.min(14, shake + 5)
+      triggerCheer()
+    }
+
+    function updatePolice(dt) {
+      const now = performance.now()
+      for (let i = policeUnits.length - 1; i >= 0; i -= 1) {
+        const p = policeUnits[i]
+        if (!p.target || p.target.eliminated) {
+          if (p.target) {
+            p.target.kidnapped = false
+            p.target.kidnapUntil = 0
+          }
+          policeUnits.splice(i, 1)
           continue
         }
-        g.wobble += 0.05 * dt
-        // Små eldpartiklar i zonen
-        if (Math.random() < 0.35) {
-          const ang = Math.random() * Math.PI * 2
-          const dist = Math.random() * g.r * 0.85
-          particles.push({
-            x: g.x + Math.cos(ang) * dist,
-            y: g.y + Math.sin(ang) * dist,
-            vx: (Math.random() - 0.5) * 1.5,
-            vy: -1.5 - Math.random() * 2.5,
-            life: 0.85,
-            decay: 0.04 + Math.random() * 0.03,
-            size: 3 + Math.random() * 5,
-            color: Math.random() > 0.5 ? [255, 140, 30] : [255, 70, 20],
-            fire: true,
-          })
-        }
-        if (now < g.nextTick) continue
-        g.nextTick = now + NOKIA_FIRE_TICK_MS
-        for (let j = 0; j < fighters.length; j += 1) {
-          const f = fighters[j]
-          if (f === g.owner || f.eliminated || f.lives <= 0) continue
-          if (bossMode && !f.isBoss) continue
-          if (Math.hypot(f.x - g.x, f.y - g.y) > g.r + getRadius(f) * 0.2) continue
-          const shielded = f.player && now < f.shieldUntil
-          if (!shielded) {
-            f.lives -= NOKIA_FIRE_DAMAGE
-            if (f.isBoss) addBossDamage(g.owner, NOKIA_FIRE_DAMAGE)
+        if (p.phase === 'chase') {
+          const dx = p.target.x - p.x
+          const dy = p.target.y - p.y
+          const dist = Math.hypot(dx, dy) || 1
+          p.vx += (dx / dist) * 0.7 * dt
+          p.vy += (dy / dist) * 0.7 * dt
+          const sp = Math.hypot(p.vx, p.vy)
+          if (sp > POLICE_SPEED) {
+            p.vx = (p.vx / sp) * POLICE_SPEED
+            p.vy = (p.vy / sp) * POLICE_SPEED
           }
-          f.squash = Math.max(f.squash, 0.25)
+          p.x += p.vx * dt
+          p.y += p.vy * dt
+          if (dist < POLICE_CATCH + getRadius(p.target)) {
+            p.phase = 'kidnap'
+            p.kidnapUntil = now + KIDNAP_ESCAPE_MS
+            p.target.kidnapped = true
+            p.target.kidnapUntil = p.kidnapUntil
+            p.target.vx = 0
+            p.target.vy = 0
+            spawnBurst(p.x, p.y, 1.5)
+            shake = Math.min(14, shake + 6)
+          }
+        } else if (p.phase === 'kidnap') {
+          // Dra ut och håll kvar tills 10s gått → slipper ut med pistol
+          const ang = Math.atan2(p.y - cy, p.x - cx)
+          const outDist = Math.hypot(p.x - cx, p.y - cy)
+          if (outDist < arenaR + 55) {
+            p.vx = Math.cos(ang) * POLICE_SPEED * 1.2
+            p.vy = Math.sin(ang) * POLICE_SPEED * 1.2
+            p.x += p.vx * dt
+            p.y += p.vy * dt
+          } else {
+            p.vx = 0
+            p.vy = 0
+          }
+          p.target.x = p.x + Math.cos(ang) * (p.r + 8)
+          p.target.y = p.y + Math.sin(ang) * (p.r + 8)
+          p.target.vx = 0
+          p.target.vy = 0
+          if (now >= (p.kidnapUntil || 0)) {
+            releaseKidnap(p)
+            policeUnits.splice(i, 1)
+            spawnBurst(p.x, p.y, 1.4)
+          }
         }
       }
     }
 
-    function drawNokiaFire(g, now = performance.now()) {
-      const lifeLeft = Math.max(0, Math.min(1, (g.expiresAt - now) / NOKIA_FIRE_DURATION_MS))
-      const pulse = 1 + Math.sin(now / 160 + g.wobble) * 0.04
-      const r = g.r * pulse
+    function drawPolice(p) {
+      const r = p.r
       ctx.save()
-      const grad = ctx.createRadialGradient(g.x, g.y, r * 0.1, g.x, g.y, r)
-      grad.addColorStop(0, `rgba(255, 200, 60, ${0.35 + lifeLeft * 0.2})`)
-      grad.addColorStop(0.45, `rgba(255, 100, 20, ${0.28 + lifeLeft * 0.12})`)
-      grad.addColorStop(1, 'rgba(180, 30, 0, 0)')
-      ctx.fillStyle = grad
+      ctx.translate(p.x, p.y)
+      // Grön polisboll
+      const body = ctx.createRadialGradient(-r * 0.25, -r * 0.3, r * 0.1, 0, 0, r)
+      body.addColorStop(0, '#86efac')
+      body.addColorStop(0.6, '#22c55e')
+      body.addColorStop(1, '#166534')
+      ctx.fillStyle = body
       ctx.beginPath()
-      ctx.arc(g.x, g.y, r, 0, Math.PI * 2)
+      ctx.arc(0, 0, r, 0, Math.PI * 2)
       ctx.fill()
-      ctx.strokeStyle = `rgba(255, 160, 40, ${0.55 + lifeLeft * 0.3})`
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 3
+      ctx.stroke()
+      // Uniform / badge
+      ctx.fillStyle = '#1e3a5f'
+      ctx.beginPath()
+      ctx.ellipse(0, r * 0.15, r * 0.72, r * 0.55, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#f0c040'
+      ctx.beginPath()
+      ctx.moveTo(0, -r * 0.05)
+      ctx.lineTo(r * 0.18, r * 0.2)
+      ctx.lineTo(-r * 0.18, r * 0.2)
+      ctx.closePath()
+      ctx.fill()
+      // Polis-mössa
+      ctx.fillStyle = '#1e3a5f'
+      ctx.beginPath()
+      ctx.ellipse(0, -r * 0.55, r * 0.7, r * 0.28, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#111827'
+      ctx.fillRect(-r * 0.75, -r * 0.62, r * 1.5, r * 0.12)
+      ctx.fillStyle = '#f0c040'
+      ctx.fillRect(-r * 0.12, -r * 0.78, r * 0.24, r * 0.2)
+      // Ögon
+      ctx.fillStyle = '#111'
+      ctx.beginPath()
+      ctx.arc(-r * 0.22, -r * 0.12, r * 0.1, 0, Math.PI * 2)
+      ctx.arc(r * 0.22, -r * 0.12, r * 0.1, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+
+    function drawNokiaDialButtons() {
+      nokiaDialButtonRed = { x: -999, y: -999, w: 0, h: 0 }
+      nokiaDialButtonBlue = { x: -999, y: -999, w: 0, h: 0 }
+      if (inventory.nokiaRed) {
+        const bx = 28
+        const by = 140
+        nokiaDialButtonRed = { x: bx, y: by, w: 88, h: 34 }
+        ctx.fillStyle = nokiaDialOpen && nokiaDialSide === 'red' ? '#f0c040' : '#2a3540'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(bx, by, 88, 34, 8)
+        else ctx.rect(bx, by, 88, 34)
+        ctx.fill()
+        ctx.fillStyle = nokiaDialOpen && nokiaDialSide === 'red' ? '#2a1c08' : '#9fe8ff'
+        ctx.font = 'bold 13px Figtree, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText('NOKIA', bx + 44, by + 17)
+      }
+      if (inventory.nokiaBlue) {
+        const bx = width - 116
+        const by = 140
+        nokiaDialButtonBlue = { x: bx, y: by, w: 88, h: 34 }
+        ctx.fillStyle = nokiaDialOpen && nokiaDialSide === 'blue' ? '#f0c040' : '#2a3540'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(bx, by, 88, 34, 8)
+        else ctx.rect(bx, by, 88, 34)
+        ctx.fill()
+        ctx.fillStyle = nokiaDialOpen && nokiaDialSide === 'blue' ? '#2a1c08' : '#9fe8ff'
+        ctx.font = 'bold 13px Figtree, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText('NOKIA', bx + 44, by + 17)
+      }
+    }
+
+    function drawNokiaDial() {
+      nokiaDialHits.length = 0
+      if (!nokiaDialOpen) return
+      const panelW = Math.min(320, width * 0.85)
+      const panelH = 340
+      const px = width * 0.5 - panelW * 0.5
+      const py = height * 0.5 - panelH * 0.5
+      ctx.save()
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'
+      ctx.fillRect(0, 0, width, height)
+      ctx.fillStyle = '#1a1f24'
+      ctx.strokeStyle = '#7ec8ff'
       ctx.lineWidth = 3
       ctx.beginPath()
-      ctx.arc(g.x, g.y, r, 0, Math.PI * 2)
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(px, py, panelW, panelH, 14)
+      else ctx.rect(px, py, panelW, panelH)
+      ctx.fill()
       ctx.stroke()
+      ctx.fillStyle = '#9fe8ff'
+      ctx.font = 'bold 22px Syne, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.fillText(`NOKIA (${nokiaDialSide === 'red' ? 'Röd' : 'Blå'})`, width * 0.5, py + 16)
+      ctx.fillStyle = '#0b1220'
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(px + 28, py + 56, panelW - 56, 44, 8)
+      } else ctx.rect(px + 28, py + 56, panelW - 56, 44)
+      ctx.fill()
+      ctx.fillStyle = '#86efac'
+      ctx.font = 'bold 26px Figtree, sans-serif'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(nokiaDialInput || '…', width * 0.5, py + 78)
+      ctx.fillStyle = 'rgba(255,255,255,0.55)'
+      ctx.font = '13px Figtree, sans-serif'
+      ctx.textBaseline = 'top'
+      ctx.fillText('Skriv 112 för polis', width * 0.5, py + 112)
+      if (nokiaDialMessage && performance.now() < nokiaDialMessageUntil) {
+        ctx.fillStyle = nokiaDialMessage.startsWith('112') ? '#86efac' : '#fca5a5'
+        ctx.font = '600 14px Figtree, sans-serif'
+        ctx.fillText(nokiaDialMessage, width * 0.5, py + 134)
+      }
+      // Knappmatta 1-9, 0
+      const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK']
+      const startX = px + 40
+      const startY = py + 165
+      const kw = 70
+      const kh = 36
+      const gap = 10
+      keys.forEach((key, i) => {
+        const col = i % 3
+        const row = Math.floor(i / 3)
+        const kx = startX + col * (kw + gap)
+        const ky = startY + row * (kh + gap)
+        ctx.fillStyle = key === 'OK' ? '#22c55e' : key === '⌫' ? '#4b5563' : '#334155'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(kx, ky, kw, kh, 8)
+        else ctx.rect(kx, ky, kw, kh)
+        ctx.fill()
+        ctx.fillStyle = '#fff'
+        ctx.font = 'bold 16px Figtree, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(key, kx + kw * 0.5, ky + kh * 0.5)
+        nokiaDialHits.push({ x: kx, y: ky, w: kw, h: kh, id: key })
+      })
+      ctx.fillStyle = '#fff'
+      ctx.font = 'bold 20px Syne, sans-serif'
+      ctx.fillText('✕', width * 0.5, py + panelH - 28)
+      nokiaDialHits.push({ x: width * 0.5 - 16, y: py + panelH - 40, w: 32, h: 32, id: 'close' })
       ctx.restore()
     }
 
@@ -1321,8 +1791,8 @@ arenaR = Math.min(width, height) * 0.78
               f.squash = 0.55
               f.vx += a.vx * 0.18
               f.vy += a.vy * 0.18
-              spawnBurst(a.x, a.y, 1.0)
-              shake = Math.min(12, shake + 4)
+              spawnBurst(a.x, a.y, a.pistol ? 0.7 : 1.0)
+              shake = Math.min(12, shake + (a.pistol ? 3 : 4))
             }
             hit = true
             break
@@ -1333,6 +1803,21 @@ arenaR = Math.min(width, height) * 0.78
     }
 
     function drawArrow(a) {
+      if (a.pistol) {
+        ctx.save()
+        ctx.translate(a.x, a.y)
+        ctx.rotate(a.angle || 0)
+        ctx.fillStyle = '#f0c040'
+        ctx.beginPath()
+        ctx.ellipse(0, 0, a.r * 1.8, a.r * 0.7, 0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#fff8dc'
+        ctx.beginPath()
+        ctx.arc(a.r * 0.9, 0, a.r * 0.45, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+        return
+      }
       if (a.rpg) {
         ctx.save()
         ctx.translate(a.x, a.y)
@@ -1497,13 +1982,23 @@ arenaR = Math.min(width, height) * 0.78
       if (attacker.control !== 'arrows' && attacker.control !== 'wasd') return
       let kind = getSideWeapon(attacker)
       // Nermin: ingen kniv — bara armar/ben (båge/nokia/rpg får fortfarande skjuta)
-      if (nerminPower && kind !== 'bow' && kind !== 'nokia' && kind !== 'rpg' && kind !== 'ping') {
+      if (
+        nerminPower &&
+        kind !== 'bow' &&
+        kind !== 'nokia' &&
+        kind !== 'pistol' &&
+        kind !== 'rpg' &&
+        kind !== 'ping'
+      ) {
         kind = 'limb'
       } else if (kind === 'ping') {
         shootPingPong(attacker)
         return
       } else if (kind === 'rpg') {
         shootRpg(attacker)
+        return
+      } else if (kind === 'pistol') {
+        shootPistol(attacker)
         return
       } else if (kind === 'bow' || kind === 'nokia') {
         shootBow(attacker)
@@ -1614,7 +2109,8 @@ arenaR = Math.min(width, height) * 0.78
     }
 
     function collidePair(a, b, now) {
-      if (a.eliminated || b.eliminated) return false
+      if (a.eliminated || b.eliminated || a.kidnapped || b.kidnapped) return false
+      if (a.escaping || b.escaping) return false
 
       const ra = getRadius(a)
       const rb = getRadius(b)
@@ -1635,6 +2131,31 @@ arenaR = Math.min(width, height) * 0.78
       const canHurt = now >= a.hitUntil && now >= b.hitUntil
       const vsBoss = !!(a.isBoss || b.isBoss)
       const pvpTouch = !vsBoss && !bossMode
+
+      // Bil kör över motståndaren
+      if (canHurt && ((a.inCar && !b.inCar) || (b.inCar && !a.inCar))) {
+        const driver = a.inCar ? a : b
+        const victim = a.inCar ? b : a
+        if (now >= (driver.carHitUntil || 0)) {
+          const shielded =
+            victim.control === 'wasd' && now < victim.shieldUntil
+          if (!shielded) {
+            victim.lives -= CAR_DAMAGE
+            if (victim.isBoss) addBossDamage(driver, CAR_DAMAGE)
+          }
+          victim.squash = 0.85
+          const push = driver === a ? 1 : -1
+          victim.vx += nx * push * 14
+          victim.vy += ny * push * 14
+          driver.carHitUntil = now + CAR_HIT_COOLDOWN
+          driver.hitUntil = now + 200
+          victim.hitUntil = now + 400
+          spawnBurst(victim.x, victim.y, 1.6)
+          shake = Math.min(18, shake + 8)
+          flash = Math.min(0.5, flash + 0.25)
+          triggerCheer()
+        }
+      }
 
       if (canHurt && vsBoss) {
         const boss = a.isBoss ? a : b
@@ -1803,7 +2324,7 @@ arenaR = Math.min(width, height) * 0.78
       pingBalls.length = 0
       bodyguards.length = 0
       farts.length = 0
-      nokiaFires.length = 0
+      policeUnits.length = 0
       clearKeys()
       // Behåll poäng/guld — fortsätt mot 30
       resetFighters()
@@ -1821,7 +2342,7 @@ arenaR = Math.min(width, height) * 0.78
       pingBalls.length = 0
       bodyguards.length = 0
       farts.length = 0
-      nokiaFires.length = 0
+      policeUnits.length = 0
       fighters.length = 0
       clearKeys()
 
@@ -1956,6 +2477,24 @@ arenaR = Math.min(width, height) * 0.78
     function drawRespawnCountdowns(now = performance.now()) {
       for (let i = 0; i < fighters.length; i += 1) {
         const ball = fighters[i]
+        if (ball.kidnapped && ball.kidnapUntil > now) {
+          const left = Math.max(0, ball.kidnapUntil - now)
+          const n = Math.max(1, Math.ceil(left / 1000))
+          const pulse = 0.9 + Math.sin(now * 0.025) * 0.1
+          ctx.save()
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.font = `bold ${Math.floor(48 * pulse)}px Syne, sans-serif`
+          ctx.fillStyle = '#86efac'
+          ctx.strokeStyle = 'rgba(0,0,0,0.55)'
+          ctx.lineWidth = 6
+          ctx.strokeText(String(n), ball.x, ball.y - getRadius(ball) - 28)
+          ctx.fillText(String(n), ball.x, ball.y - getRadius(ball) - 28)
+          ctx.font = 'bold 12px Figtree, sans-serif'
+          ctx.fillStyle = 'rgba(255,255,255,0.85)'
+          ctx.fillText('fri + pistol', ball.x, ball.y - getRadius(ball) - 52)
+          ctx.restore()
+        }
         if (!ball.eliminated || !ball.respawnAt) continue
 
         const left = Math.max(0, ball.respawnAt - now)
@@ -1997,9 +2536,17 @@ arenaR = Math.min(width, height) * 0.78
         if (farts[i].expiresAt > 0) farts[i].expiresAt += ms
         if (farts[i].nextTick > 0) farts[i].nextTick += ms
       }
-      for (let i = 0; i < nokiaFires.length; i += 1) {
-        if (nokiaFires[i].expiresAt > 0) nokiaFires[i].expiresAt += ms
-        if (nokiaFires[i].nextTick > 0) nokiaFires[i].nextTick += ms
+      for (let i = 0; i < fighters.length; i += 1) {
+        const f = fighters[i]
+        if (f.burnUntil > 0) f.burnUntil += ms
+        if (f.burnNextTick > 0) f.burnNextTick += ms
+        if (f.kidnapUntil > 0) f.kidnapUntil += ms
+        if (f.escapeUntil > 0) f.escapeUntil += ms
+        if (f.carUntil > 0) f.carUntil += ms
+        if (f.carHitUntil > 0) f.carHitUntil += ms
+      }
+      for (let i = 0; i < policeUnits.length; i += 1) {
+        if (policeUnits[i].kidnapUntil > 0) policeUnits[i].kidnapUntil += ms
       }
       if (winnerUntil > 0) winnerUntil += ms
       if (moggerUntil > 0) moggerUntil += ms
@@ -2052,6 +2599,29 @@ arenaR = Math.min(width, height) * 0.78
 
     function shopPrice(cost) {
       return shopFree ? 0 : cost
+    }
+
+    function sideCoins(side) {
+      return side === 'red' ? redCoins : blueCoins
+    }
+
+    function canAfford(side, cost) {
+      const price = shopPrice(cost)
+      if (price <= 0) return true
+      return sideCoins(side) >= price
+    }
+
+    function payCoins(side, cost) {
+      const price = shopPrice(cost)
+      if (price <= 0) return true
+      if (side === 'red') {
+        if (redCoins < price) return false
+        redCoins -= price
+        return true
+      }
+      if (blueCoins < price) return false
+      blueCoins -= price
+      return true
     }
 
     function openShop() {
@@ -2399,7 +2969,7 @@ arenaR = Math.min(width, height) * 0.78
         inventory.rpgBlue = true
         inventory.weaponRed = 'rpg'
         inventory.weaponBlue = 'rpg'
-        codesMessage = `Ali! RPG · ${RPG_DAMAGE} dmg · exploderar nära`
+        codesMessage = `Ali! RPG · ${RPG_DAMAGE} träff + eld ${RPG_FIRE_DAMAGE}/s · 2s`
         codesMessageUntil = performance.now() + 3500
         codesInput = ''
         spawnBurst(cx, cy, 2.2)
@@ -2488,8 +3058,8 @@ arenaR = Math.min(width, height) * 0.78
       shopHits.length = 0
       if (!shopOpen) return
 
-      const panelW = Math.min(720, width * 0.94)
-      const panelH = Math.min(520, height * 0.9)
+      const panelW = Math.min(760, width * 0.96)
+      const panelH = Math.min(640, height * 0.94)
       const px = width * 0.5 - panelW * 0.5
       const py = height * 0.5 - panelH * 0.5
       const midX = px + panelW * 0.5
@@ -2531,8 +3101,8 @@ arenaR = Math.min(width, height) * 0.78
       const bowCostBlue = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelBlue))
       const items = []
 
-      if (inventory.startWeaponRed === 'sword') {
-        items.push({
+      items.push(
+        {
           id: 'swordRed',
           title: materialUpgradeTitle('sword', inventory.swordLevelRed),
           desc: `R · Q · ${swordDamageFor({ player: true })} dmg`,
@@ -2540,25 +3110,10 @@ arenaR = Math.min(width, height) * 0.78
           side: 'Röd',
           owned: inventory.swordLevelRed,
           canBuy:
-            (canUpgradeMaterial(inventory.swordLevelRed) && redCoins >= swordCostRed) ||
+            (canUpgradeMaterial(inventory.swordLevelRed) && canAfford('red', swordCostRed)) ||
             inventory.weaponRed !== 'sword',
-        })
-      } else if (inventory.startWeaponRed === 'bow') {
-        items.push({
-          id: 'bowRed',
-          title: materialUpgradeTitle('bow', inventory.bowLevelRed),
-          desc: `R · Q · pil ${BOW_DAMAGE + inventory.bowLevelRed} dmg`,
-          cost: canUpgradeBow(inventory.bowLevelRed) ? bowCostRed : 0,
-          side: 'Röd',
-          owned: inventory.bowLevelRed,
-          canBuy:
-            (canUpgradeBow(inventory.bowLevelRed) && redCoins >= bowCostRed) ||
-            (inventory.weaponRed !== 'bow' && inventory.weaponRed !== 'nokia'),
-        })
-      }
-
-      if (inventory.startWeaponBlue === 'sword') {
-        items.push({
+        },
+        {
           id: 'swordBlue',
           title: materialUpgradeTitle('sword', inventory.swordLevelBlue),
           desc: `B · 2 · ${swordDamageFor({ control: 'arrows' })} dmg`,
@@ -2566,11 +3121,21 @@ arenaR = Math.min(width, height) * 0.78
           side: 'Blå',
           owned: inventory.swordLevelBlue,
           canBuy:
-            (canUpgradeMaterial(inventory.swordLevelBlue) && blueCoins >= swordCostBlue) ||
+            (canUpgradeMaterial(inventory.swordLevelBlue) && canAfford('blue', swordCostBlue)) ||
             inventory.weaponBlue !== 'sword',
-        })
-      } else if (inventory.startWeaponBlue === 'bow') {
-        items.push({
+        },
+        {
+          id: 'bowRed',
+          title: materialUpgradeTitle('bow', inventory.bowLevelRed),
+          desc: `R · Q · pil ${BOW_DAMAGE + inventory.bowLevelRed} dmg`,
+          cost: canUpgradeBow(inventory.bowLevelRed) ? bowCostRed : 0,
+          side: 'Röd',
+          owned: inventory.bowLevelRed,
+          canBuy:
+            (canUpgradeBow(inventory.bowLevelRed) && canAfford('red', bowCostRed)) ||
+            (inventory.weaponRed !== 'bow' && inventory.weaponRed !== 'nokia'),
+        },
+        {
           id: 'bowBlue',
           title: materialUpgradeTitle('bow', inventory.bowLevelBlue),
           desc: `B · 2 · pil ${BOW_DAMAGE + inventory.bowLevelBlue} dmg`,
@@ -2578,35 +3143,142 @@ arenaR = Math.min(width, height) * 0.78
           side: 'Blå',
           owned: inventory.bowLevelBlue,
           canBuy:
-            (canUpgradeBow(inventory.bowLevelBlue) && blueCoins >= bowCostBlue) ||
+            (canUpgradeBow(inventory.bowLevelBlue) && canAfford('blue', bowCostBlue)) ||
             (inventory.weaponBlue !== 'bow' && inventory.weaponBlue !== 'nokia'),
-        })
-      }
-
-      items.push(
+        },
         {
           id: 'nokiaRed',
           title: inventory.nokiaRed ? 'Nokia (utrustad)' : 'Nokia-pilbåge',
-          desc: `R · Q · träff ${NOKIA_HIT_DAMAGE} · eld ${NOKIA_FIRE_DAMAGE}/0.5s`,
+          desc: `R · Q · ${NOKIA_HIT_DAMAGE} + bränn · ring 112`,
           cost: inventory.nokiaRed ? 0 : shopPrice(NOKIA_COST),
           side: 'Röd',
           owned: inventory.nokiaRed ? 1 : 0,
           canBuy:
             inventory.weaponRed !== 'nokia' &&
-            (inventory.nokiaRed || redCoins >= shopPrice(NOKIA_COST)),
+            (inventory.nokiaRed || canAfford('red', NOKIA_COST)),
         },
         {
           id: 'nokiaBlue',
           title: inventory.nokiaBlue ? 'Nokia (utrustad)' : 'Nokia-pilbåge',
-          desc: `B · 2 · träff ${NOKIA_HIT_DAMAGE} · eld ${NOKIA_FIRE_DAMAGE}/0.5s`,
+          desc: `B · 2 · ${NOKIA_HIT_DAMAGE} + bränn · ring 112`,
           cost: inventory.nokiaBlue ? 0 : shopPrice(NOKIA_COST),
           side: 'Blå',
           owned: inventory.nokiaBlue ? 1 : 0,
           canBuy:
             inventory.weaponBlue !== 'nokia' &&
-            (inventory.nokiaBlue || blueCoins >= shopPrice(NOKIA_COST)),
+            (inventory.nokiaBlue || canAfford('blue', NOKIA_COST)),
         },
       )
+
+      const pistolCostRed = shopPrice(
+        weaponUpgradeCost(UPGRADE_BASE_COST, inventory.pistolLevelRed),
+      )
+      const pistolCostBlue = shopPrice(
+        weaponUpgradeCost(UPGRADE_BASE_COST, inventory.pistolLevelBlue),
+      )
+      const pistolDmgRed = PISTOL_DAMAGE + inventory.pistolLevelRed
+      const pistolDmgBlue = PISTOL_DAMAGE + inventory.pistolLevelBlue
+
+      {
+        const owned = inventory.pistolRed
+        const canUp = owned && canUpgradePistol(inventory.pistolLevelRed)
+        const title = !owned
+          ? 'Pistol'
+          : canUp
+            ? `Pistol ${pistolDmgRed}→${pistolDmgRed + 1} dmg`
+            : inventory.weaponRed === 'pistol'
+              ? `Pistol ${pistolDmgRed} dmg MAX`
+              : `Pistol ${pistolDmgRed} dmg`
+        const cost = !owned
+          ? shopPrice(PISTOL_COST)
+          : canUp
+            ? pistolCostRed
+            : 0
+        items.push({
+          id: 'pistolRed',
+          title,
+          desc: `R · Q · ${pistolDmgRed} dmg · snabb`,
+          cost,
+          side: 'Röd',
+          owned: owned ? inventory.pistolLevelRed : 0,
+          canBuy:
+            (!owned && canAfford('red', PISTOL_COST)) ||
+            (canUp && canAfford('red', pistolCostRed)) ||
+            (owned && inventory.weaponRed !== 'pistol' && inventory.weaponRed !== 'rpg'),
+        })
+        if (owned && !inventory.rpgRed) {
+          items.push({
+            id: 'pistolRpgRed',
+            title: 'Pistol → RPG',
+            desc: `R · ${RPG_DAMAGE} träff + ${RPG_FIRE_DAMAGE}/sek eld · 2s`,
+            cost: shopPrice(PISTOL_RPG_COST),
+            side: 'Röd',
+            owned: 0,
+            canBuy: canAfford('red', PISTOL_RPG_COST),
+          })
+        }
+      }
+      if (inventory.rpgRed) {
+        items.push({
+          id: 'rpgRed',
+          title: inventory.weaponRed === 'rpg' ? 'RPG (utrustad)' : 'RPG',
+          desc: `R · Q · ${RPG_DAMAGE} + eld ${RPG_FIRE_DAMAGE}/s · 2s`,
+          cost: 0,
+          side: 'Röd',
+          owned: 1,
+          canBuy: inventory.weaponRed !== 'rpg',
+        })
+      }
+      {
+        const owned = inventory.pistolBlue
+        const canUp = owned && canUpgradePistol(inventory.pistolLevelBlue)
+        const title = !owned
+          ? 'Pistol'
+          : canUp
+            ? `Pistol ${pistolDmgBlue}→${pistolDmgBlue + 1} dmg`
+            : inventory.weaponBlue === 'pistol'
+              ? `Pistol ${pistolDmgBlue} dmg MAX`
+              : `Pistol ${pistolDmgBlue} dmg`
+        const cost = !owned
+          ? shopPrice(PISTOL_COST)
+          : canUp
+            ? pistolCostBlue
+            : 0
+        items.push({
+          id: 'pistolBlue',
+          title,
+          desc: `B · 2 · ${pistolDmgBlue} dmg · snabb`,
+          cost,
+          side: 'Blå',
+          owned: owned ? inventory.pistolLevelBlue : 0,
+          canBuy:
+            (!owned && canAfford('blue', PISTOL_COST)) ||
+            (canUp && canAfford('blue', pistolCostBlue)) ||
+            (owned && inventory.weaponBlue !== 'pistol' && inventory.weaponBlue !== 'rpg'),
+        })
+        if (owned && !inventory.rpgBlue) {
+          items.push({
+            id: 'pistolRpgBlue',
+            title: 'Pistol → RPG',
+            desc: `B · ${RPG_DAMAGE} träff + ${RPG_FIRE_DAMAGE}/sek eld · 2s`,
+            cost: shopPrice(PISTOL_RPG_COST),
+            side: 'Blå',
+            owned: 0,
+            canBuy: canAfford('blue', PISTOL_RPG_COST),
+          })
+        }
+      }
+      if (inventory.rpgBlue) {
+        items.push({
+          id: 'rpgBlue',
+          title: inventory.weaponBlue === 'rpg' ? 'RPG (utrustad)' : 'RPG',
+          desc: `B · 2 · ${RPG_DAMAGE} + eld ${RPG_FIRE_DAMAGE}/s · 2s`,
+          cost: 0,
+          side: 'Blå',
+          owned: 1,
+          canBuy: inventory.weaponBlue !== 'rpg',
+        })
+      }
 
       items.push(
         {
@@ -2616,7 +3288,7 @@ arenaR = Math.min(width, height) * 0.78
           cost: shopPrice(LIFE_DRINK_COST),
           side: 'Röd',
           owned: inventory.lifeDrinkRed,
-          canBuy: redCoins >= shopPrice(LIFE_DRINK_COST),
+          canBuy: canAfford('red', LIFE_DRINK_COST),
         },
         {
           id: 'lifeDrinkBlue',
@@ -2625,7 +3297,7 @@ arenaR = Math.min(width, height) * 0.78
           cost: shopPrice(LIFE_DRINK_COST),
           side: 'Blå',
           owned: inventory.lifeDrinkBlue,
-          canBuy: blueCoins >= shopPrice(LIFE_DRINK_COST),
+          canBuy: canAfford('blue', LIFE_DRINK_COST),
         },
         {
           id: 'bodyguardRed',
@@ -2634,7 +3306,7 @@ arenaR = Math.min(width, height) * 0.78
           cost: shopPrice(BODYGUARD_COST),
           side: 'Röd',
           owned: bodyguards.filter((g) => g.owner?.player).length,
-          canBuy: redCoins >= shopPrice(BODYGUARD_COST),
+          canBuy: canAfford('red', BODYGUARD_COST),
         },
         {
           id: 'bodyguardBlue',
@@ -2643,7 +3315,7 @@ arenaR = Math.min(width, height) * 0.78
           cost: shopPrice(BODYGUARD_COST),
           side: 'Blå',
           owned: bodyguards.filter((g) => g.owner && !g.owner.player).length,
-          canBuy: blueCoins >= shopPrice(BODYGUARD_COST),
+          canBuy: canAfford('blue', BODYGUARD_COST),
         },
         {
           id: 'susRed',
@@ -2652,7 +3324,7 @@ arenaR = Math.min(width, height) * 0.78
           cost: shopPrice(SUS_COST),
           side: 'Röd',
           owned: inventory.susRed,
-          canBuy: redCoins >= shopPrice(SUS_COST),
+          canBuy: canAfford('red', SUS_COST),
         },
         {
           id: 'susBlue',
@@ -2661,25 +3333,7 @@ arenaR = Math.min(width, height) * 0.78
           cost: shopPrice(SUS_COST),
           side: 'Blå',
           owned: inventory.susBlue,
-          canBuy: blueCoins >= shopPrice(SUS_COST),
-        },
-        {
-          id: 'burkRed',
-          title: 'Burk',
-          desc: 'R · F · plocka upp prut',
-          cost: shopPrice(BURK_COST),
-          side: 'Röd',
-          owned: inventory.burkRed,
-          canBuy: redCoins >= shopPrice(BURK_COST),
-        },
-        {
-          id: 'burkBlue',
-          title: 'Burk',
-          desc: 'B · 4 · plocka upp prut',
-          cost: shopPrice(BURK_COST),
-          side: 'Blå',
-          owned: inventory.burkBlue,
-          canBuy: blueCoins >= shopPrice(BURK_COST),
+          canBuy: canAfford('blue', SUS_COST),
         },
         {
           id: 'moggerRed',
@@ -2687,8 +3341,8 @@ arenaR = Math.min(width, height) * 0.78
           desc: `R · svart bana · ${MOGGER_DAMAGE}/sek · 15s`,
           cost: shopPrice(MOGGER_COST),
           side: 'Röd',
-          owned: moggerUntil > 0 ? 1 : 0,
-          canBuy: redCoins >= shopPrice(MOGGER_COST),
+          owned: moggerUntil > 0 && moggerOwner === 'red' ? 1 : 0,
+          canBuy: canAfford('red', MOGGER_COST),
         },
         {
           id: 'moggerBlue',
@@ -2696,17 +3350,35 @@ arenaR = Math.min(width, height) * 0.78
           desc: `B · svart bana · ${MOGGER_DAMAGE}/sek · 15s`,
           cost: shopPrice(MOGGER_COST),
           side: 'Blå',
-          owned: moggerUntil > 0 ? 1 : 0,
-          canBuy: blueCoins >= shopPrice(MOGGER_COST),
+          owned: moggerUntil > 0 && moggerOwner === 'blue' ? 1 : 0,
+          canBuy: canAfford('blue', MOGGER_COST),
+        },
+        {
+          id: 'carRed',
+          title: 'Bil',
+          desc: `R · Escape ${CAR_ESCAPE_MS / 1000}s · kör över · ${CAR_DAMAGE} dmg`,
+          cost: shopPrice(CAR_COST),
+          side: 'Röd',
+          owned: inventory.carRed,
+          canBuy: canAfford('red', CAR_COST),
+        },
+        {
+          id: 'carBlue',
+          title: 'Bil',
+          desc: `B · Escape ${CAR_ESCAPE_MS / 1000}s · kör över · ${CAR_DAMAGE} dmg`,
+          cost: shopPrice(CAR_COST),
+          side: 'Blå',
+          owned: inventory.carBlue,
+          canBuy: canAfford('blue', CAR_COST),
         },
       )
 
       const blueItems = items.filter((it) => it.side === 'Blå')
       const redItems = items.filter((it) => it.side === 'Röd')
       const startY = py + 88
-      const rowH = 44
-      const btnW = 72
-      const btnH = 28
+      const rowH = 34
+      const btnW = 78
+      const btnH = 24
 
       // Mittstreck: blå vänster, röd höger
       ctx.beginPath()
@@ -2740,11 +3412,11 @@ arenaR = Math.min(width, height) * 0.78
           ctx.textAlign = 'left'
           ctx.textBaseline = 'top'
           ctx.fillStyle = '#ffffff'
-          ctx.font = 'bold 14px Figtree, sans-serif'
-          ctx.fillText(item.title, colX, y + 2)
-          ctx.font = '11px Figtree, sans-serif'
+          ctx.font = 'bold 12px Figtree, sans-serif'
+          ctx.fillText(item.title, colX, y + 1)
+          ctx.font = '10px Figtree, sans-serif'
           ctx.fillStyle = 'rgba(255,255,255,0.55)'
-          ctx.fillText(`${item.desc} · äger ${item.owned}`, colX, y + 20)
+          ctx.fillText(`${item.desc} · äger ${item.owned}`, colX, y + 16)
 
           const showMax =
             item.cost === 0 && String(item.title).includes('MAX') && !item.canBuy
@@ -2754,14 +3426,13 @@ arenaR = Math.min(width, height) * 0.78
           else ctx.rect(bx, by, btnW, btnH)
           ctx.fill()
           ctx.fillStyle = item.canBuy && !showMax ? '#2a1c08' : '#9ca3af'
-          ctx.font = 'bold 12px Figtree, sans-serif'
+          ctx.font = 'bold 11px Figtree, sans-serif'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillText(
-            showMax ? 'MAX' : item.cost === 0 ? 'GRATIS' : `${item.cost} 🪙`,
-            bx + btnW * 0.5,
-            by + btnH * 0.5,
-          )
+          let label = 'GRATIS'
+          if (showMax) label = 'MAX'
+          else if (item.cost > 0) label = `${item.cost} 🪙`
+          ctx.fillText(label, bx + btnW * 0.5, by + btnH * 0.5)
 
           shopHits.push({ x: bx, y: by, w: btnW, h: btnH, id: item.id })
         })
@@ -2869,13 +3540,11 @@ arenaR = Math.min(width, height) * 0.78
       if (!shopOpen) return
       if (id === 'swordRed') {
         if (canUpgradeMaterial(inventory.swordLevelRed)) {
-          const price = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.swordLevelRed))
-          if (redCoins >= price) {
-            redCoins -= price
-            inventory.swordLevelRed += 1
-            inventory.weaponRed = 'sword'
-            return
-          }
+          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.swordLevelRed)
+          if (!payCoins('red', price)) return
+          inventory.swordLevelRed += 1
+          inventory.weaponRed = 'sword'
+          return
         }
         if (inventory.weaponRed === 'sword') return
         inventory.weaponRed = 'sword'
@@ -2883,13 +3552,11 @@ arenaR = Math.min(width, height) * 0.78
       }
       if (id === 'swordBlue') {
         if (canUpgradeMaterial(inventory.swordLevelBlue)) {
-          const price = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.swordLevelBlue))
-          if (blueCoins >= price) {
-            blueCoins -= price
-            inventory.swordLevelBlue += 1
-            inventory.weaponBlue = 'sword'
-            return
-          }
+          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.swordLevelBlue)
+          if (!payCoins('blue', price)) return
+          inventory.swordLevelBlue += 1
+          inventory.weaponBlue = 'sword'
+          return
         }
         if (inventory.weaponBlue === 'sword') return
         inventory.weaponBlue = 'sword'
@@ -2897,13 +3564,11 @@ arenaR = Math.min(width, height) * 0.78
       }
       if (id === 'bowRed') {
         if (canUpgradeBow(inventory.bowLevelRed)) {
-          const price = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelRed))
-          if (redCoins >= price) {
-            redCoins -= price
-            inventory.bowLevelRed += 1
-            inventory.weaponRed = 'bow'
-            return
-          }
+          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelRed)
+          if (!payCoins('red', price)) return
+          inventory.bowLevelRed += 1
+          inventory.weaponRed = 'bow'
+          return
         }
         if (inventory.weaponRed === 'bow') return
         inventory.weaponRed = 'bow'
@@ -2911,13 +3576,11 @@ arenaR = Math.min(width, height) * 0.78
       }
       if (id === 'bowBlue') {
         if (canUpgradeBow(inventory.bowLevelBlue)) {
-          const price = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelBlue))
-          if (blueCoins >= price) {
-            blueCoins -= price
-            inventory.bowLevelBlue += 1
-            inventory.weaponBlue = 'bow'
-            return
-          }
+          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelBlue)
+          if (!payCoins('blue', price)) return
+          inventory.bowLevelBlue += 1
+          inventory.weaponBlue = 'bow'
+          return
         }
         if (inventory.weaponBlue === 'bow') return
         inventory.weaponBlue = 'bow'
@@ -2926,9 +3589,7 @@ arenaR = Math.min(width, height) * 0.78
       if (id === 'nokiaRed') {
         if (inventory.weaponRed === 'nokia') return
         if (!inventory.nokiaRed) {
-          const cost = shopPrice(NOKIA_COST)
-          if (redCoins < cost) return
-          redCoins -= cost
+          if (!payCoins('red', NOKIA_COST)) return
           inventory.nokiaRed = true
         }
         inventory.weaponRed = 'nokia'
@@ -2937,92 +3598,134 @@ arenaR = Math.min(width, height) * 0.78
       if (id === 'nokiaBlue') {
         if (inventory.weaponBlue === 'nokia') return
         if (!inventory.nokiaBlue) {
-          const cost = shopPrice(NOKIA_COST)
-          if (blueCoins < cost) return
-          blueCoins -= cost
+          if (!payCoins('blue', NOKIA_COST)) return
           inventory.nokiaBlue = true
         }
         inventory.weaponBlue = 'nokia'
         return
       }
+      if (id === 'pistolRed') {
+        if (!inventory.pistolRed) {
+          if (!payCoins('red', PISTOL_COST)) return
+          inventory.pistolRed = true
+          inventory.weaponRed = 'pistol'
+          return
+        }
+        if (canUpgradePistol(inventory.pistolLevelRed)) {
+          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.pistolLevelRed)
+          if (!payCoins('red', price)) return
+          inventory.pistolLevelRed += 1
+          inventory.weaponRed = 'pistol'
+          return
+        }
+        if (inventory.weaponRed === 'pistol') return
+        inventory.weaponRed = 'pistol'
+        return
+      }
+      if (id === 'pistolBlue') {
+        if (!inventory.pistolBlue) {
+          if (!payCoins('blue', PISTOL_COST)) return
+          inventory.pistolBlue = true
+          inventory.weaponBlue = 'pistol'
+          return
+        }
+        if (canUpgradePistol(inventory.pistolLevelBlue)) {
+          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.pistolLevelBlue)
+          if (!payCoins('blue', price)) return
+          inventory.pistolLevelBlue += 1
+          inventory.weaponBlue = 'pistol'
+          return
+        }
+        if (inventory.weaponBlue === 'pistol') return
+        inventory.weaponBlue = 'pistol'
+        return
+      }
+      if (id === 'pistolRpgRed') {
+        if (!inventory.pistolRed || inventory.rpgRed) return
+        if (!payCoins('red', PISTOL_RPG_COST)) return
+        inventory.rpgRed = true
+        inventory.weaponRed = 'rpg'
+        return
+      }
+      if (id === 'pistolRpgBlue') {
+        if (!inventory.pistolBlue || inventory.rpgBlue) return
+        if (!payCoins('blue', PISTOL_RPG_COST)) return
+        inventory.rpgBlue = true
+        inventory.weaponBlue = 'rpg'
+        return
+      }
+      if (id === 'rpgRed') {
+        if (!inventory.rpgRed || inventory.weaponRed === 'rpg') return
+        inventory.weaponRed = 'rpg'
+        return
+      }
+      if (id === 'rpgBlue') {
+        if (!inventory.rpgBlue || inventory.weaponBlue === 'rpg') return
+        inventory.weaponBlue = 'rpg'
+        return
+      }
       if (id === 'lifeDrinkRed') {
-        const cost = shopPrice(LIFE_DRINK_COST)
-        if (redCoins < cost) return
-        redCoins -= cost
+        if (!payCoins('red', LIFE_DRINK_COST)) return
         inventory.lifeDrinkRed += 1
         return
       }
       if (id === 'lifeDrinkBlue') {
-        const cost = shopPrice(LIFE_DRINK_COST)
-        if (blueCoins < cost) return
-        blueCoins -= cost
+        if (!payCoins('blue', LIFE_DRINK_COST)) return
         inventory.lifeDrinkBlue += 1
         return
       }
       if (id === 'bodyguardRed') {
-        const cost = shopPrice(BODYGUARD_COST)
-        if (redCoins < cost) return
         const red = fighters.find((f) => f.player && !f.eliminated)
         const target = bossMode
           ? fighters.find((f) => f.isBoss && !f.eliminated)
           : fighters.find((f) => f.control === 'arrows' && !f.eliminated)
         if (!red || !target) return
-        redCoins -= cost
+        if (!payCoins('red', BODYGUARD_COST)) return
         spawnBodyguard(red, target)
         return
       }
       if (id === 'bodyguardBlue') {
-        const cost = shopPrice(BODYGUARD_COST)
-        if (blueCoins < cost) return
         const blue = fighters.find((f) => f.control === 'arrows' && !f.eliminated)
         const target = bossMode
           ? fighters.find((f) => f.isBoss && !f.eliminated)
           : fighters.find((f) => f.player && !f.eliminated)
         if (!blue || !target) return
-        blueCoins -= cost
+        if (!payCoins('blue', BODYGUARD_COST)) return
         spawnBodyguard(blue, target)
         return
       }
       if (id === 'moggerRed') {
-        const cost = shopPrice(MOGGER_COST)
-        if (redCoins < cost) return
-        redCoins -= cost
+        if (!payCoins('red', MOGGER_COST)) return
         startMoggerFace('red')
         return
       }
       if (id === 'moggerBlue') {
-        const cost = shopPrice(MOGGER_COST)
-        if (blueCoins < cost) return
-        blueCoins -= cost
+        if (!payCoins('blue', MOGGER_COST)) return
         startMoggerFace('blue')
         return
       }
+      if (id === 'carRed') {
+        if (!payCoins('red', CAR_COST)) return
+        inventory.carRed += 1
+        const red = fighters.find((f) => f.player && !f.eliminated)
+        if (red) startCarEscape(red)
+        return
+      }
+      if (id === 'carBlue') {
+        if (!payCoins('blue', CAR_COST)) return
+        inventory.carBlue += 1
+        const blue = fighters.find((f) => f.control === 'arrows' && !f.eliminated)
+        if (blue) startCarEscape(blue)
+        return
+      }
       if (id === 'susRed') {
-        const cost = shopPrice(SUS_COST)
-        if (redCoins < cost) return
-        redCoins -= cost
+        if (!payCoins('red', SUS_COST)) return
         inventory.susRed += 1
         return
       }
       if (id === 'susBlue') {
-        const cost = shopPrice(SUS_COST)
-        if (blueCoins < cost) return
-        blueCoins -= cost
+        if (!payCoins('blue', SUS_COST)) return
         inventory.susBlue += 1
-        return
-      }
-      if (id === 'burkRed') {
-        const cost = shopPrice(BURK_COST)
-        if (redCoins < cost) return
-        redCoins -= cost
-        inventory.burkRed += 1
-        return
-      }
-      if (id === 'burkBlue') {
-        const cost = shopPrice(BURK_COST)
-        if (blueCoins < cost) return
-        blueCoins -= cost
-        inventory.burkBlue += 1
         return
       }
     }
@@ -3065,35 +3768,6 @@ arenaR = Math.min(width, height) * 0.78
       return true
     }
 
-    function tryPickupFart(fighter) {
-      if (!fighter || fighter.eliminated || fighter.lives <= 0) return false
-      const red = isRedSide(fighter)
-      if (red ? inventory.burkRed <= 0 : inventory.burkBlue <= 0) return false
-      for (let i = farts.length - 1; i >= 0; i -= 1) {
-        const g = farts[i]
-        if (Math.hypot(fighter.x - g.x, fighter.y - g.y) > g.r + getRadius(fighter) * 0.2) continue
-        farts.splice(i, 1)
-        if (red) inventory.fartCanRed += 1
-        else inventory.fartCanBlue += 1
-        spawnBurst(fighter.x, fighter.y, 0.9)
-        return true
-      }
-      return false
-    }
-
-    function releaseFartFromCan(fighter) {
-      if (!fighter || fighter.eliminated || fighter.lives <= 0) return
-      const red = isRedSide(fighter)
-      if (red) {
-        if (inventory.fartCanRed <= 0) return
-        inventory.fartCanRed -= 1
-      } else {
-        if (inventory.fartCanBlue <= 0) return
-        inventory.fartCanBlue -= 1
-      }
-      spawnFart(fighter)
-    }
-
     function updateFarts(dt, now) {
       for (let i = farts.length - 1; i >= 0; i -= 1) {
         const g = farts[i]
@@ -3103,22 +3777,6 @@ arenaR = Math.min(width, height) * 0.78
         }
         g.r = fartRadius(g.owner)
         g.wobble += 0.03 * dt
-
-        // Auto-plocka med burk
-        for (let j = 0; j < fighters.length; j += 1) {
-          const f = fighters[j]
-          if (f.eliminated || f.lives <= 0) continue
-          const red = isRedSide(f)
-          const hasBurk = red ? inventory.burkRed > 0 : inventory.burkBlue > 0
-          if (!hasBurk) continue
-          if (Math.hypot(f.x - g.x, f.y - g.y) <= g.r + getRadius(f) * 0.15) {
-            farts.splice(i, 1)
-            if (red) inventory.fartCanRed += 1
-            else inventory.fartCanBlue += 1
-            break
-          }
-        }
-        if (!farts[i] || farts[i] !== g) continue
 
         if (now < g.nextTick) continue
         g.nextTick = now + SUS_TICK_MS
@@ -3363,20 +4021,23 @@ arenaR = Math.min(width, height) * 0.78
       inventory.pingLevel = 0
       inventory.nokiaRed = false
       inventory.nokiaBlue = false
+      inventory.pistolRed = false
+      inventory.pistolBlue = false
+      inventory.pistolLevelRed = 0
+      inventory.pistolLevelBlue = 0
       inventory.rpgRed = false
       inventory.rpgBlue = false
       inventory.lifeDrinkRed = 0
       inventory.lifeDrinkBlue = 0
       inventory.susRed = 0
       inventory.susBlue = 0
-      inventory.burkRed = 0
-      inventory.burkBlue = 0
-      inventory.fartCanRed = 0
-      inventory.fartCanBlue = 0
+      inventory.carRed = 0
+      inventory.carBlue = 0
       otisPower = false
       nerminPower = false
       farts.length = 0
-      nokiaFires.length = 0
+      policeUnits.length = 0
+      closeNokiaDial()
       resetFighters()
       openWeaponSelect()
     }
@@ -3397,21 +4058,23 @@ arenaR = Math.min(width, height) * 0.78
       ctx.fillText(`×${redCoins}`, 48, 98)
 
       const redW = inventory.weaponRed
-      const redLabel = nerminPower && redW !== 'rpg' && redW !== 'bow' && redW !== 'nokia'
+      const redLabel = nerminPower && redW !== 'rpg' && redW !== 'bow' && redW !== 'nokia' && redW !== 'pistol'
         ? 'Armar/ben · Q'
         : redW === 'rpg'
           ? 'RPG · Q'
-          : redW === 'bow'
-            ? 'Pilbåge · Q'
-            : redW === 'sword'
-              ? 'Svärd · Q'
-              : redW === 'nokia'
-                ? 'Nokia · Q'
-                : redW === 'knife'
-                  ? 'Kniv · Q'
-                  : redW === 'foot'
-                    ? 'Fot · Q'
-                    : ''
+          : redW === 'pistol'
+            ? 'Pistol · Q'
+            : redW === 'bow'
+              ? 'Pilbåge · Q'
+              : redW === 'sword'
+                ? 'Svärd · Q'
+                : redW === 'nokia'
+                  ? 'Nokia · Q'
+                  : redW === 'knife'
+                    ? 'Kniv · Q'
+                    : redW === 'foot'
+                      ? 'Fot · Q'
+                      : ''
       if (redLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
         ctx.fillStyle = 'rgba(255,255,255,0.7)'
@@ -3432,21 +4095,23 @@ arenaR = Math.min(width, height) * 0.78
       ctx.fillText(`×${blueCoins}`, width - 48, 98)
 
       const blueW = inventory.weaponBlue
-      const blueLabel = nerminPower && blueW !== 'rpg' && blueW !== 'bow' && blueW !== 'nokia'
+      const blueLabel = nerminPower && blueW !== 'rpg' && blueW !== 'bow' && blueW !== 'nokia' && blueW !== 'pistol'
         ? 'Armar/ben · 2'
         : blueW === 'rpg'
           ? 'RPG · 2'
-          : blueW === 'bow'
-            ? 'Pilbåge · 2'
-            : blueW === 'sword'
-              ? 'Svärd · 2'
-              : blueW === 'nokia'
-                ? 'Nokia · 2'
-                : blueW === 'knife'
-                  ? 'Kniv · 2'
-                  : blueW === 'ping'
-                    ? 'Pingis · 2'
-                    : ''
+          : blueW === 'pistol'
+            ? 'Pistol · 2'
+            : blueW === 'bow'
+              ? 'Pilbåge · 2'
+              : blueW === 'sword'
+                ? 'Svärd · 2'
+                : blueW === 'nokia'
+                  ? 'Nokia · 2'
+                  : blueW === 'knife'
+                    ? 'Kniv · 2'
+                    : blueW === 'ping'
+                      ? 'Pingis · 2'
+                      : ''
       if (blueLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
         ctx.fillStyle = 'rgba(255,255,255,0.7)'
@@ -3595,24 +4260,94 @@ arenaR = Math.min(width, height) * 0.78
       ctx.stroke()
     }
 
+    function drawCarBody(ball, r) {
+      const ang = ball.carAngle || 0
+      ctx.save()
+      ctx.rotate(ang)
+      // Bilkaross
+      ctx.fillStyle = ball.color || '#ff4d3a'
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(-r * 1.35, -r * 0.72, r * 2.7, r * 1.44, r * 0.28)
+      } else {
+        ctx.rect(-r * 1.35, -r * 0.72, r * 2.7, r * 1.44)
+      }
+      ctx.fill()
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(-r * 0.35, -r * 0.55, r * 1.05, r * 1.1, r * 0.15)
+      } else {
+        ctx.rect(-r * 0.35, -r * 0.55, r * 1.05, r * 1.1)
+      }
+      ctx.fill()
+      // Hjul
+      ctx.fillStyle = '#111'
+      ctx.beginPath()
+      ctx.arc(-r * 0.75, r * 0.78, r * 0.28, 0, Math.PI * 2)
+      ctx.arc(r * 0.75, r * 0.78, r * 0.28, 0, Math.PI * 2)
+      ctx.arc(-r * 0.75, -r * 0.78, r * 0.28, 0, Math.PI * 2)
+      ctx.arc(r * 0.75, -r * 0.78, r * 0.28, 0, Math.PI * 2)
+      ctx.fill()
+      // Strålkastare
+      ctx.fillStyle = '#ffe9a0'
+      ctx.beginPath()
+      ctx.arc(r * 1.25, -r * 0.35, r * 0.14, 0, Math.PI * 2)
+      ctx.arc(r * 1.25, r * 0.35, r * 0.14, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+
+    function drawEscapeHud(now = performance.now()) {
+      for (let i = 0; i < fighters.length; i += 1) {
+        const f = fighters[i]
+        if (!f.escaping) continue
+        const left = Math.max(0, f.escapeUntil - now)
+        const sec = Math.ceil(left / 1000)
+        const pulse = 0.92 + Math.sin(now * 0.02) * 0.08
+        ctx.save()
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.font = `bold ${Math.floor(64 * pulse)}px Syne, sans-serif`
+        ctx.fillStyle = '#f0c040'
+        ctx.strokeStyle = 'rgba(0,0,0,0.65)'
+        ctx.lineWidth = 10
+        ctx.strokeText('ESCAPE', width * 0.5, height * 0.22)
+        ctx.fillText('ESCAPE', width * 0.5, height * 0.22)
+        ctx.font = 'bold 28px Figtree, sans-serif'
+        ctx.fillStyle = '#ffffff'
+        ctx.strokeText(`${sec}s`, width * 0.5, height * 0.22 + 52)
+        ctx.fillText(`${sec}s`, width * 0.5, height * 0.22 + 52)
+        ctx.restore()
+        break
+      }
+    }
+
     function drawBall(ball, r, happy) {
       const squash = Math.min(0.45, ball.squash || 0)
       const anger = ball.anger || 0
       const color = ball.color || '#ff4d3a'
       const glowColor = ball.glow || '#ff8a70'
+      const showCar = !!(ball.inCar || ball.escaping)
 
       ctx.save()
       ctx.translate(ball.x, ball.y + r * 0.55)
       ctx.scale(1, 0.35)
       ctx.fillStyle = 'rgba(0,0,0,0.45)'
       ctx.beginPath()
-      ctx.arc(0, 0, Math.max(0.5, r * 0.95), 0, Math.PI * 2)
+      ctx.arc(0, 0, Math.max(0.5, r * (showCar ? 1.2 : 0.95)), 0, Math.PI * 2)
       ctx.fill()
       ctx.restore()
 
       ctx.save()
       ctx.translate(ball.x, ball.y)
       ctx.scale(1 + squash * 0.25, Math.max(0.7, 1 - squash * 0.2))
+
+      if (showCar) {
+        drawCarBody(ball, r)
+        ctx.restore()
+        return
+      }
 
       // Outer glow
       const glow = ctx.createRadialGradient(0, 0, r * 0.15, 0, 0, r * 2.4)
@@ -3840,11 +4575,16 @@ arenaR = Math.min(width, height) * 0.78
         let kind = swinging ? ball.meleeKind || weapon || 'knife' : weapon
         if (nerminPower && (kind === 'knife' || kind === 'sword')) kind = 'limb'
         const showHeld =
-          (!nerminPower || kind === 'rpg' || kind === 'bow' || kind === 'nokia') &&
+          (!nerminPower ||
+            kind === 'rpg' ||
+            kind === 'bow' ||
+            kind === 'nokia' ||
+            kind === 'pistol') &&
           (kind === 'foot' ||
             kind === 'ping' ||
             kind === 'bow' ||
             kind === 'nokia' ||
+            kind === 'pistol' ||
             kind === 'rpg' ||
             kind === 'sword' ||
             (swinging && kind === 'knife'))
@@ -3865,43 +4605,60 @@ arenaR = Math.min(width, height) * 0.78
                 ? 180
                 : kind === 'rpg'
                   ? RPG_DRAW_MS
-                  : kind === 'bow' || kind === 'nokia'
-                    ? BOW_DRAW_MS
-                    : kind === 'sword'
-                      ? SWORD_SWING_MS
-                      : KNIFE_SWING_MS
+                  : kind === 'pistol'
+                    ? PISTOL_DRAW_MS
+                    : kind === 'bow' || kind === 'nokia'
+                      ? BOW_DRAW_MS
+                      : kind === 'sword'
+                        ? SWORD_SWING_MS
+                        : KNIFE_SWING_MS
           const swingLeft = swinging ? Math.max(0, (ball.knifeSwingUntil || 0) - now) : swingMs
           const swingT = swinging ? 1 - swingLeft / swingMs : 0
+          const rangedHold =
+            kind === 'ping' ||
+            kind === 'bow' ||
+            kind === 'nokia' ||
+            kind === 'pistol' ||
+            kind === 'rpg'
           const faceAngle =
-            typeof ball.knifeAngle === 'number' &&
-            (swinging || kind === 'ping' || kind === 'bow' || kind === 'nokia' || kind === 'rpg')
+            typeof ball.knifeAngle === 'number' && (swinging || rangedHold)
               ? ball.knifeAngle
               : (ball.face || 1) > 0
                 ? 0
                 : Math.PI
           const swingArc = swinging
             ? Math.sin(swingT * Math.PI) *
-              (kind === 'foot'
-                ? 0.9
-                : kind === 'ping' || kind === 'bow' || kind === 'nokia' || kind === 'rpg'
-                  ? 0.2
-                  : 1.1)
+              (kind === 'foot' ? 0.9 : rangedHold ? 0.2 : 1.1)
             : 0
           const dir =
             faceAngle +
             swingArc -
-            (swinging &&
-            kind !== 'ping' &&
-            kind !== 'bow' &&
-            kind !== 'nokia' &&
-            kind !== 'rpg'
-              ? 0.55
-              : 0)
+            (swinging && !rangedHold ? 0.55 : 0)
 
           ctx.save()
           ctx.rotate(dir)
 
-          if (kind === 'rpg') {
+          if (kind === 'pistol') {
+            ctx.translate(r * 0.7, 0)
+            ctx.fillStyle = '#2a2a2a'
+            ctx.beginPath()
+            if (typeof ctx.roundRect === 'function') {
+              ctx.roundRect(0, -r * 0.12, r * 0.95, r * 0.24, 2)
+            } else {
+              ctx.rect(0, -r * 0.12, r * 0.95, r * 0.24)
+            }
+            ctx.fill()
+            ctx.fillStyle = '#444'
+            ctx.beginPath()
+            if (typeof ctx.roundRect === 'function') {
+              ctx.roundRect(r * 0.05, r * 0.08, r * 0.28, r * 0.4, 2)
+            } else {
+              ctx.rect(r * 0.05, r * 0.08, r * 0.28, r * 0.4)
+            }
+            ctx.fill()
+            ctx.fillStyle = '#f0c040'
+            ctx.fillRect(r * 0.85, -r * 0.08, r * 0.12, r * 0.16)
+          } else if (kind === 'rpg') {
             ctx.translate(r * 0.75, 0)
             ctx.fillStyle = '#4a5a3a'
             ctx.beginPath()
@@ -4222,7 +4979,7 @@ arenaR = Math.min(width, height) * 0.78
           return
         }
 
-        if (shopOpen || codesOpen || weaponSelectOpen) {
+        if (shopOpen || codesOpen || weaponSelectOpen || nokiaDialOpen) {
           last = now
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
           ctx.clearRect(0, 0, width, height)
@@ -4239,14 +4996,14 @@ arenaR = Math.min(width, height) * 0.78
           for (let i = 0; i < pingBalls.length; i += 1) {
             drawPingBall(pingBalls[i])
           }
-for (let i = 0; i < arrows.length; i += 1) {
+          for (let i = 0; i < arrows.length; i += 1) {
             drawArrow(arrows[i])
           }
           for (let i = 0; i < farts.length; i += 1) {
             drawFart(farts[i], shopPausedAt || now)
           }
-          for (let i = 0; i < nokiaFires.length; i += 1) {
-            drawNokiaFire(nokiaFires[i], shopPausedAt || now)
+          for (let i = 0; i < policeUnits.length; i += 1) {
+            drawPolice(policeUnits[i])
           }
           for (let i = 0; i < bodyguards.length; i += 1) {
             drawBodyguard(bodyguards[i])
@@ -4254,11 +5011,14 @@ for (let i = 0; i < arrows.length; i += 1) {
           drawScores()
           drawShopButton()
           drawGoldCoins()
+          drawNokiaDialButtons()
           drawRespawnCountdowns(shopPausedAt || weaponSelectPausedAt || now)
+          drawEscapeHud(shopPausedAt || weaponSelectPausedAt || now)
           drawBossHud()
           drawShop()
           drawCodes()
           drawWeaponSelect()
+          drawNokiaDial()
           return
         }
 
@@ -4277,7 +5037,8 @@ for (let i = 0; i < arrows.length; i += 1) {
         updateArrows(dt)
         updateBodyguards(dt, now)
         updateFarts(dt, now)
-        updateNokiaFires(dt, now)
+        updateBurns(dt, now)
+        updatePolice(dt)
         updateMogger(now)
         removeDeadFighters()
         updateSpectators(dt, now)
@@ -4304,9 +5065,6 @@ for (let i = 0; i < arrows.length; i += 1) {
 
         for (let i = 0; i < farts.length; i += 1) {
           drawFart(farts[i], now)
-        }
-        for (let i = 0; i < nokiaFires.length; i += 1) {
-          drawNokiaFire(nokiaFires[i], now)
         }
 
         for (let i = shocks.length - 1; i >= 0; i -= 1) {
@@ -4360,6 +5118,9 @@ for (let i = 0; i < arrows.length; i += 1) {
           drawBall(fighters[i], getRadius(fighters[i]), false)
         }
 
+        for (let i = 0; i < policeUnits.length; i += 1) {
+          drawPolice(policeUnits[i])
+        }
 
         for (let i = 0; i < bombs.length; i += 1) {
           drawBomb(bombs[i])
@@ -4383,11 +5144,14 @@ for (let i = 0; i < arrows.length; i += 1) {
         drawScores()
         drawShopButton()
         drawGoldCoins()
+        drawNokiaDialButtons()
         drawRespawnCountdowns()
+        drawEscapeHud()
         drawBossHud()
         drawShop()
         drawCodes()
         drawWeaponSelect()
+        drawNokiaDial()
 
         if (flash > 0.02) {
           ctx.fillStyle = `rgba(255,250,230,${flash * 0.35})`
@@ -4438,6 +5202,25 @@ for (let i = 0; i < arrows.length; i += 1) {
       if (k === 'escape') {
         closeShop()
         closeCodes()
+        closeNokiaDial()
+        return
+      }
+      if (nokiaDialOpen) {
+        e.preventDefault()
+        if (!e.repeat) {
+          if (e.key === 'Enter') {
+            submitNokiaDial()
+            return
+          }
+          if (e.key === 'Backspace') {
+            nokiaDialInput = nokiaDialInput.slice(0, -1)
+            return
+          }
+          if (/^[0-9]$/.test(e.key) && nokiaDialInput.length < 6) {
+            nokiaDialInput += e.key
+            if (nokiaDialInput === NOKIA_DIAL_CODE) submitNokiaDial()
+          }
+        }
         return
       }
       if (weaponSelectOpen) {
@@ -4538,13 +5321,6 @@ for (let i = 0; i < arrows.length; i += 1) {
         if (!useSus(player, 'red')) useLifeDrink(player, 'red')
         return
       }
-      if (k === 'f' && !e.repeat) {
-        e.preventDefault()
-        const player = fighters.find((f) => f.player)
-        if (!player) return
-        if (!tryPickupFart(player)) releaseFartFromCan(player)
-        return
-      }
       if ((k === '2' || e.code === 'Digit2' || e.code === 'Numpad2') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
@@ -4555,13 +5331,6 @@ for (let i = 0; i < arrows.length; i += 1) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
         if (blue) useLifeDrink(blue, 'blue')
-        return
-      }
-      if ((k === '4' || e.code === 'Digit4' || e.code === 'Numpad4') && !e.repeat) {
-        e.preventDefault()
-        const blue = fighters.find((f) => f.control === 'arrows')
-        if (!blue) return
-        if (!tryPickupFart(blue)) releaseFartFromCan(blue)
         return
       }
       if ((k === '0' || e.code === 'Digit0' || e.code === 'Numpad0') && !e.repeat) {
@@ -4618,6 +5387,22 @@ for (let i = 0; i < arrows.length; i += 1) {
     function onPointerDown(e) {
       const { x: px, y: py } = canvasPos(e)
 
+      if (nokiaDialOpen) {
+        for (let i = nokiaDialHits.length - 1; i >= 0; i -= 1) {
+          const hit = nokiaDialHits[i]
+          if (!hitRect(px, py, hit)) continue
+          if (hit.id === 'close') closeNokiaDial()
+          else if (hit.id === '⌫') nokiaDialInput = nokiaDialInput.slice(0, -1)
+          else if (hit.id === 'OK') submitNokiaDial()
+          else if (/^[0-9]$/.test(hit.id) && nokiaDialInput.length < 6) {
+            nokiaDialInput += hit.id
+            if (nokiaDialInput === NOKIA_DIAL_CODE) submitNokiaDial()
+          }
+          return
+        }
+        return
+      }
+
       if (weaponSelectOpen) {
         for (let i = weaponSelectHits.length - 1; i >= 0; i -= 1) {
           const hit = weaponSelectHits[i]
@@ -4649,6 +5434,15 @@ for (let i = 0; i < arrows.length; i += 1) {
         return
       }
 
+      if (inventory.nokiaRed && hitRect(px, py, nokiaDialButtonRed)) {
+        openNokiaDial('red')
+        return
+      }
+      if (inventory.nokiaBlue && hitRect(px, py, nokiaDialButtonBlue)) {
+        openNokiaDial('blue')
+        return
+      }
+
       if (winner || bossMode) return
 
       if (hitRect(px, py, shopButton)) {
@@ -4663,11 +5457,16 @@ for (let i = 0; i < arrows.length; i += 1) {
     function onPointerMove(e) {
       const { x: px, y: py } = canvasPos(e)
       let over = hitRect(px, py, shopButton) || hitRect(px, py, codesButton)
+      if (inventory.nokiaRed && hitRect(px, py, nokiaDialButtonRed)) over = true
+      if (inventory.nokiaBlue && hitRect(px, py, nokiaDialButtonBlue)) over = true
       if (shopOpen) {
         over = shopHits.some((h) => hitRect(px, py, h))
       }
       if (weaponSelectOpen) {
         over = weaponSelectHits.some((h) => hitRect(px, py, h))
+      }
+      if (nokiaDialOpen) {
+        over = nokiaDialHits.some((h) => hitRect(px, py, h)) || true
       }
       if (codesOpen) over = true
       canvas.style.cursor = over ? 'pointer' : 'default'
