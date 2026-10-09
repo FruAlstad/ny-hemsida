@@ -187,8 +187,8 @@ function FightingBalls() {
     let cx = 0
     let cy = 0
     let arenaR = 0
-    let ballR = 34
-    let spectatorR = 18
+    let ballR = 22
+    let spectatorR = 12
 
     const particles = []
     const shocks = []
@@ -390,9 +390,9 @@ function FightingBalls() {
 
       cx = width * 0.5
       cy = height * 0.5
-arenaR = Math.min(width, height) * 0.78
-      ballR = Math.max(34, Math.min(54, arenaR * 0.14))
-      spectatorR = Math.max(12, Math.min(22, arenaR * 0.055))
+      arenaR = Math.min(width, height) * 0.78
+      ballR = Math.max(20, Math.min(32, arenaR * 0.09))
+      spectatorR = Math.max(9, Math.min(15, arenaR * 0.04))
       resetFighters()
       placeSpectators()
     }
