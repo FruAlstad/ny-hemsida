@@ -57,7 +57,7 @@ const POLICE_SPEED = 10
 const POLICE_RADIUS = 26
 const POLICE_CATCH = 42
 const KIDNAP_ESCAPE_MS = 10000
-const PISTOL_DAMAGE = 2 // Lv0=2 … Lv4=6; Lv5+ RPG; Lv9 sniper
+const PISTOL_DAMAGE = 1 // Lv0=1 … Lv4=5; Lv5+ RPG; Lv9 sniper
 const PISTOL_MAX_LEVEL = 9
 const PISTOL_RPG_LEVEL = 5
 const PISTOL_SNIPER_LEVEL = 9
@@ -260,6 +260,8 @@ function FightingBalls() {
       nokiaBlue: false,
       pistolRed: false,
       pistolBlue: false,
+      pistolUnlockedRed: false, // shop efter polis-kidnap
+      pistolUnlockedBlue: false,
       pistolLevelRed: 0, // 0..9 · Lv5 RPG · Lv9 sniper
       pistolLevelBlue: 0,
       rpgRed: false,
@@ -1159,6 +1161,11 @@ function FightingBalls() {
       return level < PISTOL_MAX_LEVEL
     }
 
+    function pistolUpgradeCost(level) {
+      // Dubbelt mot vanlig uppgraderingspris
+      return weaponUpgradeCost(UPGRADE_BASE_COST, level) * 2
+    }
+
     function equipPistolForm(side) {
       const level = side === 'red' ? inventory.pistolLevelRed : inventory.pistolLevelBlue
       const form = pistolFormForLevel(level)
@@ -1547,10 +1554,13 @@ function FightingBalls() {
 
     function givePistol(fighter) {
       if (!fighter) return
+      // Polis-kidnap → pistol + uppgraderingar i shopen för den som blev kidnappad
       if (isRedSide(fighter)) {
+        inventory.pistolUnlockedRed = true
         inventory.pistolRed = true
         equipPistolForm('red')
       } else {
+        inventory.pistolUnlockedBlue = true
         inventory.pistolBlue = true
         equipPistolForm('blue')
       }
@@ -2999,6 +3009,8 @@ function FightingBalls() {
         return
       }
       if (typed === ALI_CODE) {
+        inventory.pistolUnlockedRed = true
+        inventory.pistolUnlockedBlue = true
         inventory.pistolRed = true
         inventory.pistolBlue = true
         inventory.pistolLevelRed = Math.max(inventory.pistolLevelRed, PISTOL_RPG_LEVEL)
@@ -3206,29 +3218,21 @@ function FightingBalls() {
         },
       )
 
-      const pistolCostRed = shopPrice(
-        weaponUpgradeCost(UPGRADE_BASE_COST, inventory.pistolLevelRed),
-      )
-      const pistolCostBlue = shopPrice(
-        weaponUpgradeCost(UPGRADE_BASE_COST, inventory.pistolLevelBlue),
-      )
+      const pistolCostRed = shopPrice(pistolUpgradeCost(inventory.pistolLevelRed))
+      const pistolCostBlue = shopPrice(pistolUpgradeCost(inventory.pistolLevelBlue))
 
-      {
+      // Pistol syns bara i shopen för den som blivit kidnappad av polisen
+      if (inventory.pistolUnlockedRed) {
         const owned = inventory.pistolRed
         const level = inventory.pistolLevelRed
         const canUp = owned && canUpgradePistol(level)
         const preview = pistolShopPreview(level)
         const form = pistolFormForLevel(level)
-        const equipped =
-          inventory.weaponRed === form ||
-          inventory.weaponRed === 'pistol' ||
-          inventory.weaponRed === 'rpg' ||
-          inventory.weaponRed === 'sniper'
         const title = !owned
           ? 'Pistol'
           : canUp
             ? `${preview.title} ${nextPistolUpgradeLabel(level)}`
-            : equipped && inventory.weaponRed === form
+            : inventory.weaponRed === form
               ? `${preview.title} MAX`
               : preview.title
         const cost = !owned
@@ -3249,22 +3253,17 @@ function FightingBalls() {
             (owned && inventory.weaponRed !== form),
         })
       }
-      {
+      if (inventory.pistolUnlockedBlue) {
         const owned = inventory.pistolBlue
         const level = inventory.pistolLevelBlue
         const canUp = owned && canUpgradePistol(level)
         const preview = pistolShopPreview(level)
         const form = pistolFormForLevel(level)
-        const equipped =
-          inventory.weaponBlue === form ||
-          inventory.weaponBlue === 'pistol' ||
-          inventory.weaponBlue === 'rpg' ||
-          inventory.weaponBlue === 'sniper'
         const title = !owned
           ? 'Pistol'
           : canUp
             ? `${preview.title} ${nextPistolUpgradeLabel(level)}`
-            : equipped && inventory.weaponBlue === form
+            : inventory.weaponBlue === form
               ? `${preview.title} MAX`
               : preview.title
         const cost = !owned
@@ -3610,6 +3609,7 @@ function FightingBalls() {
         return
       }
       if (id === 'pistolRed') {
+        if (!inventory.pistolUnlockedRed) return
         if (!inventory.pistolRed) {
           if (!payCoins('red', PISTOL_COST)) return
           inventory.pistolRed = true
@@ -3617,7 +3617,7 @@ function FightingBalls() {
           return
         }
         if (canUpgradePistol(inventory.pistolLevelRed)) {
-          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.pistolLevelRed)
+          const price = pistolUpgradeCost(inventory.pistolLevelRed)
           if (!payCoins('red', price)) return
           inventory.pistolLevelRed += 1
           equipPistolForm('red')
@@ -3629,6 +3629,7 @@ function FightingBalls() {
         return
       }
       if (id === 'pistolBlue') {
+        if (!inventory.pistolUnlockedBlue) return
         if (!inventory.pistolBlue) {
           if (!payCoins('blue', PISTOL_COST)) return
           inventory.pistolBlue = true
@@ -3636,7 +3637,7 @@ function FightingBalls() {
           return
         }
         if (canUpgradePistol(inventory.pistolLevelBlue)) {
-          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.pistolLevelBlue)
+          const price = pistolUpgradeCost(inventory.pistolLevelBlue)
           if (!payCoins('blue', price)) return
           inventory.pistolLevelBlue += 1
           equipPistolForm('blue')
@@ -3999,6 +4000,8 @@ function FightingBalls() {
       inventory.nokiaBlue = false
       inventory.pistolRed = false
       inventory.pistolBlue = false
+      inventory.pistolUnlockedRed = false
+      inventory.pistolUnlockedBlue = false
       inventory.pistolLevelRed = 0
       inventory.pistolLevelBlue = 0
       inventory.rpgRed = false
