@@ -11,6 +11,16 @@ const SHIELD_USES_PER_ROUND = 3
 const MC_SHIELD_COST = 50
 const MC_SHIELD_DURATION = 6000
 const LIFE_DRINK_COST = 3
+const KILLSTREAK_SEGMENTS = [
+  { id: 'coins8', label: '+8 🪙', rarity: 'common', color: '#6b7280' },
+  { id: 'coins15', label: '+15 🪙', rarity: 'common', color: '#78716c' },
+  { id: 'lifeDrink', label: 'Livedryck', rarity: 'good', color: '#22c55e' },
+  { id: 'sus', label: 'Sus', rarity: 'good', color: '#16a34a' },
+  { id: 'mcShield', label: 'MC-sköld', rarity: 'good', color: '#0ea5e9' },
+  { id: 'bodyguard', label: 'Bodyguard', rarity: 'better', color: '#a855f7' },
+  { id: 'mogger', label: 'Mogger', rarity: 'better', color: '#111827' },
+  { id: 'sus100', label: '100 SUS', rarity: 'jackpot', color: '#f0c040' },
+]
 const LIFE_DRINK_HEAL = 5
 const KNIFE_DAMAGE = 4
 const KNIFE_COOLDOWN = 450
@@ -233,6 +243,20 @@ function FightingBalls() {
     let codesInput = ''
     let codesMessage = ''
     let codesMessageUntil = 0
+    let killstreakMessage = ''
+    let killstreakMessageUntil = 0
+    let killstreakOpen = false
+    let killstreakSide = null // 'red' | 'blue'
+    const killstreakHits = []
+    let ksWheelAngle = 0
+    let ksSpinning = false
+    let ksSpinStart = 0
+    let ksSpinDuration = 3400
+    let ksFromAngle = 0
+    let ksToAngle = 0
+    let ksPendingPrize = null
+    let ksResultLabel = ''
+    let ksResultUntil = 0
     let codeUsesLeft = SECRET_CODE_MAX_USES
     let shopFree = false
     let otisPower = false
@@ -270,6 +294,10 @@ function FightingBalls() {
       sniperBlue: false,
       mcShieldRed: 0,
       mcShieldBlue: 0,
+      killstreakKillsRed: 0,
+      killstreakKillsBlue: 0,
+      killstreakSpinsRed: 0,
+      killstreakSpinsBlue: 0,
       footLevel: 0,
       pingLevel: 0,
       lifeDrinkRed: 0,
@@ -946,6 +974,11 @@ function FightingBalls() {
     function weaponUpgradeCost(baseCost, level) {
       // level 0 → 5, level 1 → 10, level 2 → 20, level 3 → 40 …
       return baseCost * 2 ** Math.max(0, level)
+    }
+
+    function linearWeaponUpgradeCost(level) {
+      // Kniv/svärd & pilbåge: 20 → 40 → 60 …
+      return 20 * (Math.max(0, level) + 1)
     }
 
     function canUpgradeMaterial(level) {
@@ -2489,6 +2522,7 @@ function FightingBalls() {
 
         const reward = rollKillCoins()
         if (!ball.player && ball.control === 'arrows') {
+          // Blå dog → röd får snurr, blå tappar streak
           redCoins += reward
           redScore += 1
           ball.lives = 0
@@ -2497,9 +2531,12 @@ function FightingBalls() {
           ball.eliminated = true
           ball.respawnAt = now + RESPAWN_COUNTDOWN_MS
           ball.control = null
+          addKillstreakKill('red')
+          resetKillstreak('blue')
           handleScoreMilestone('red', redScore, now)
           continue
         } else if (ball.player) {
+          // Röd dog → blå får snurr, röd tappar streak
           blueCoins += reward
           blueScore += 1
           ball.lives = 0
@@ -2508,6 +2545,8 @@ function FightingBalls() {
           ball.eliminated = true
           ball.respawnAt = now + RESPAWN_COUNTDOWN_MS
           ball.control = null
+          addKillstreakKill('blue')
+          resetKillstreak('red')
           handleScoreMilestone('blue', blueScore, now)
           continue
         }
@@ -2641,6 +2680,308 @@ function FightingBalls() {
       }
     }
 
+    function resetKillstreak(side) {
+      if (side === 'red') {
+        inventory.killstreakKillsRed = 0
+        inventory.killstreakSpinsRed = 0
+      } else {
+        inventory.killstreakKillsBlue = 0
+        inventory.killstreakSpinsBlue = 0
+      }
+      if (killstreakOpen && killstreakSide === side && !ksSpinning) {
+        closeKillstreak()
+      }
+    }
+
+    function addKillstreakKill(side) {
+      if (side === 'red') {
+        inventory.killstreakKillsRed += 1
+        inventory.killstreakSpinsRed += 1
+        killstreakMessage = `Röd killstreak ×${inventory.killstreakKillsRed} · snurr +1`
+      } else {
+        inventory.killstreakKillsBlue += 1
+        inventory.killstreakSpinsBlue += 1
+        killstreakMessage = `Blå killstreak ×${inventory.killstreakKillsBlue} · snurr +1`
+      }
+      killstreakMessageUntil = performance.now() + 2200
+    }
+
+    function killstreakWeight(seg, kills) {
+      const k = Math.max(1, kills)
+      if (seg.rarity === 'common') return Math.max(6, 28 - k * 2.2)
+      if (seg.rarity === 'good') return 7 + k * 0.9
+      if (seg.rarity === 'better') return 1.5 + k * 1.4
+      // jackpot 100 SUS: ~1.5% vid 1 kill → mycket högre med fler
+      return 0.4 + k * k * 0.35
+    }
+
+    function jackpotChancePct(kills) {
+      const k = Math.max(1, kills)
+      let total = 0
+      let jack = 0
+      for (let i = 0; i < KILLSTREAK_SEGMENTS.length; i += 1) {
+        const w = killstreakWeight(KILLSTREAK_SEGMENTS[i], k)
+        total += w
+        if (KILLSTREAK_SEGMENTS[i].id === 'sus100') jack = w
+      }
+      return total > 0 ? Math.round((jack / total) * 1000) / 10 : 0
+    }
+
+    function pickKillstreakPrize(kills) {
+      let total = 0
+      const weights = []
+      for (let i = 0; i < KILLSTREAK_SEGMENTS.length; i += 1) {
+        const w = killstreakWeight(KILLSTREAK_SEGMENTS[i], kills)
+        weights.push(w)
+        total += w
+      }
+      let r = Math.random() * total
+      for (let i = 0; i < weights.length; i += 1) {
+        r -= weights[i]
+        if (r <= 0) return i
+      }
+      return KILLSTREAK_SEGMENTS.length - 1
+    }
+
+    function applyKillstreakPrize(side, prize) {
+      if (!prize) return
+      if (prize.id === 'coins8') {
+        if (side === 'red') redCoins += 8
+        else blueCoins += 8
+      } else if (prize.id === 'coins15') {
+        if (side === 'red') redCoins += 15
+        else blueCoins += 15
+      } else if (prize.id === 'lifeDrink') {
+        if (side === 'red') inventory.lifeDrinkRed += 1
+        else inventory.lifeDrinkBlue += 1
+      } else if (prize.id === 'sus') {
+        if (side === 'red') inventory.susRed += 1
+        else inventory.susBlue += 1
+      } else if (prize.id === 'mcShield') {
+        if (side === 'red') inventory.mcShieldRed += 1
+        else inventory.mcShieldBlue += 1
+      } else if (prize.id === 'bodyguard') {
+        const owner =
+          side === 'red'
+            ? fighters.find((f) => (f.player || f.control === 'wasd') && !f.eliminated)
+            : fighters.find((f) => f.control === 'arrows' && !f.eliminated)
+        const target = bossMode
+          ? fighters.find((f) => f.isBoss && !f.eliminated)
+          : fighters.find((f) => f !== owner && !f.eliminated && !f.isBoss)
+        if (owner && target) spawnBodyguard(owner, target)
+      } else if (prize.id === 'mogger') {
+        startMoggerFace(side)
+      } else if (prize.id === 'sus100') {
+        if (side === 'red') inventory.susRed += 100
+        else inventory.susBlue += 100
+      }
+    }
+
+    function openKillstreak(side) {
+      if (killstreakOpen || ksSpinning) return
+      killstreakSide = side
+      killstreakOpen = true
+      ksResultLabel = ''
+      ksPendingPrize = null
+    }
+
+    function closeKillstreak() {
+      if (ksSpinning) return
+      killstreakOpen = false
+      killstreakSide = null
+      ksResultLabel = ''
+      ksPendingPrize = null
+    }
+
+    function startKillstreakSpin() {
+      if (!killstreakOpen || !killstreakSide || ksSpinning) return
+      const side = killstreakSide
+      const spins =
+        side === 'red' ? inventory.killstreakSpinsRed : inventory.killstreakSpinsBlue
+      const kills =
+        side === 'red' ? inventory.killstreakKillsRed : inventory.killstreakKillsBlue
+      if (spins <= 0) return
+
+      if (side === 'red') inventory.killstreakSpinsRed -= 1
+      else inventory.killstreakSpinsBlue -= 1
+
+      const idx = pickKillstreakPrize(kills)
+      const prize = KILLSTREAK_SEGMENTS[idx]
+      const n = KILLSTREAK_SEGMENTS.length
+      const slice = (Math.PI * 2) / n
+      // Pekare uppåt (−π/2): mitt på segment idx ska landa där
+      const segmentCenter = idx * slice + slice * 0.5
+      const extraTurns = 4 + Math.floor(Math.random() * 3)
+      const current = ((ksWheelAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)
+      const desired = ((-Math.PI / 2 - segmentCenter) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2)
+      let delta = desired - current
+      if (delta < 0) delta += Math.PI * 2
+
+      ksFromAngle = ksWheelAngle
+      ksToAngle = ksWheelAngle + extraTurns * Math.PI * 2 + delta
+      ksPendingPrize = prize
+      ksSpinning = true
+      ksSpinStart = performance.now()
+      ksResultLabel = ''
+    }
+
+    function updateKillstreakSpin(now = performance.now()) {
+      if (!ksSpinning) return
+      const t = Math.min(1, (now - ksSpinStart) / ksSpinDuration)
+      const ease = 1 - (1 - t) ** 3
+      ksWheelAngle = ksFromAngle + (ksToAngle - ksFromAngle) * ease
+      if (t < 1) return
+      ksSpinning = false
+      ksWheelAngle = ksToAngle
+      const prize = ksPendingPrize
+      ksPendingPrize = null
+      if (prize && killstreakSide) {
+        applyKillstreakPrize(killstreakSide, prize)
+        ksResultLabel = prize.label
+        ksResultUntil = now + 2800
+        killstreakMessage = `${killstreakSide === 'red' ? 'Röd' : 'Blå'} fick ${prize.label}!`
+        killstreakMessageUntil = now + 2800
+        spawnBurst(cx, cy, prize.id === 'sus100' ? 2.4 : 1.2)
+        if (prize.id === 'sus100') {
+          flash = Math.min(0.8, flash + 0.45)
+          shake = Math.min(18, shake + 10)
+        }
+      }
+    }
+
+    function drawKillstreakWheel() {
+      killstreakHits.length = 0
+      if (!killstreakOpen || !killstreakSide) return
+      updateKillstreakSpin()
+
+      const side = killstreakSide
+      const kills =
+        side === 'red' ? inventory.killstreakKillsRed : inventory.killstreakKillsBlue
+      const spins =
+        side === 'red' ? inventory.killstreakSpinsRed : inventory.killstreakSpinsBlue
+      const jackPct = jackpotChancePct(kills)
+
+      const panelW = Math.min(460, width * 0.92)
+      const panelH = Math.min(520, height * 0.9)
+      const px = width * 0.5 - panelW * 0.5
+      const py = height * 0.5 - panelH * 0.5
+
+      ctx.save()
+      ctx.fillStyle = 'rgba(0,0,0,0.72)'
+      ctx.fillRect(0, 0, width, height)
+      ctx.fillStyle = '#1a1520'
+      ctx.strokeStyle = side === 'red' ? '#ff6b5a' : '#5ec8ff'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(px, py, panelW, panelH, 16)
+      else ctx.rect(px, py, panelW, panelH)
+      ctx.fill()
+      ctx.stroke()
+
+      ctx.fillStyle = '#ffe9a0'
+      ctx.font = 'bold 28px Syne, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.fillText('KILLSTREAK-HJUL', width * 0.5, py + 14)
+      ctx.font = '14px Figtree, sans-serif'
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'
+      ctx.fillText(
+        `${side === 'red' ? 'Röd' : 'Blå'} · kills ${kills} · snurr ${spins} · jackpot ~${jackPct}%`,
+        width * 0.5,
+        py + 48,
+      )
+
+      const cxW = width * 0.5
+      const cyW = py + panelH * 0.48
+      const radius = Math.min(panelW, panelH) * 0.28
+      const n = KILLSTREAK_SEGMENTS.length
+      const slice = (Math.PI * 2) / n
+
+      ctx.save()
+      ctx.translate(cxW, cyW)
+      ctx.rotate(ksWheelAngle)
+      for (let i = 0; i < n; i += 1) {
+        const seg = KILLSTREAK_SEGMENTS[i]
+        const a0 = i * slice
+        const a1 = a0 + slice
+        ctx.beginPath()
+        ctx.moveTo(0, 0)
+        ctx.arc(0, 0, radius, a0, a1)
+        ctx.closePath()
+        ctx.fillStyle = seg.color
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+        ctx.lineWidth = 2
+        ctx.stroke()
+
+        const mid = a0 + slice * 0.5
+        ctx.save()
+        ctx.rotate(mid)
+        ctx.fillStyle = seg.rarity === 'jackpot' ? '#1a1208' : '#ffffff'
+        ctx.font = `bold ${Math.max(11, Math.floor(radius * 0.11))}px Figtree, sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(seg.label, radius * 0.62, 0)
+        ctx.restore()
+      }
+      ctx.beginPath()
+      ctx.arc(0, 0, radius * 0.18, 0, Math.PI * 2)
+      ctx.fillStyle = '#0f0b14'
+      ctx.fill()
+      ctx.restore()
+
+      // Pekare
+      ctx.fillStyle = '#ffe9a0'
+      ctx.beginPath()
+      ctx.moveTo(cxW, cyW - radius - 4)
+      ctx.lineTo(cxW - 12, cyW - radius - 28)
+      ctx.lineTo(cxW + 12, cyW - radius - 28)
+      ctx.closePath()
+      ctx.fill()
+
+      if (ksResultLabel && performance.now() < ksResultUntil) {
+        ctx.fillStyle = '#f0c040'
+        ctx.font = 'bold 22px Syne, sans-serif'
+        ctx.fillText(`Du fick: ${ksResultLabel}`, width * 0.5, cyW + radius + 28)
+      } else if (spins <= 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.55)'
+        ctx.font = '15px Figtree, sans-serif'
+        ctx.fillText('Döda någon för att få en snurr', width * 0.5, cyW + radius + 28)
+      }
+
+      const btnW = 120
+      const btnH = 40
+      const spinX = width * 0.5 - btnW - 10
+      const closeX = width * 0.5 + 10
+      const btnY = py + panelH - 58
+      const canSpin = spins > 0 && !ksSpinning
+
+      ctx.fillStyle = canSpin ? '#f0c040' : '#3a3344'
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(spinX, btnY, btnW, btnH, 10)
+      else ctx.rect(spinX, btnY, btnW, btnH)
+      ctx.fill()
+      ctx.fillStyle = canSpin ? '#2a1c08' : 'rgba(255,255,255,0.4)'
+      ctx.font = 'bold 16px Figtree, sans-serif'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(ksSpinning ? 'Snurrar…' : 'SNURR', spinX + btnW * 0.5, btnY + btnH * 0.5)
+      if (canSpin) killstreakHits.push({ x: spinX, y: btnY, w: btnW, h: btnH, id: 'spin' })
+
+      ctx.fillStyle = '#2a2433'
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(closeX, btnY, btnW, btnH, 10)
+      else ctx.rect(closeX, btnY, btnW, btnH)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText('STÄNG', closeX + btnW * 0.5, btnY + btnH * 0.5)
+      if (!ksSpinning) killstreakHits.push({ x: closeX, y: btnY, w: btnW, h: btnH, id: 'close' })
+
+      ctx.restore()
+    }
+
     function shopPrice(cost) {
       return shopFree ? 0 : cost
     }
@@ -2677,6 +3018,8 @@ function FightingBalls() {
 
     function closeShop() {
       if (!shopOpen) return
+      if (killstreakOpen) closeKillstreak()
+      if (ksSpinning) return
       if (shopPausedAt > 0) {
         shiftPausedTimers(performance.now() - shopPausedAt)
         shopPausedAt = 0
@@ -3143,14 +3486,20 @@ function FightingBalls() {
         py + 44,
       )
 
-      const swordCostRed = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.swordLevelRed))
-      const swordCostBlue = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.swordLevelBlue))
-      const bowCostRed = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelRed))
-      const bowCostBlue = shopPrice(weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelBlue))
+      const swordCostRed = shopPrice(linearWeaponUpgradeCost(inventory.swordLevelRed))
+      const swordCostBlue = shopPrice(linearWeaponUpgradeCost(inventory.swordLevelBlue))
+      const bowCostRed = shopPrice(linearWeaponUpgradeCost(inventory.bowLevelRed))
+      const bowCostBlue = shopPrice(linearWeaponUpgradeCost(inventory.bowLevelBlue))
       const items = []
 
-      items.push(
-        {
+      // Startvapen låser: svärd/kniv ↔ pilbåge
+      const redCanSword = inventory.startWeaponRed !== 'bow'
+      const blueCanSword = inventory.startWeaponBlue !== 'bow'
+      const redCanBow = inventory.startWeaponRed !== 'sword'
+      const blueCanBow = inventory.startWeaponBlue !== 'sword'
+
+      if (redCanSword) {
+        items.push({
           id: 'swordRed',
           title: materialUpgradeTitle('sword', inventory.swordLevelRed),
           desc: `R · Q · ${swordDamageFor({ player: true })} dmg`,
@@ -3160,19 +3509,23 @@ function FightingBalls() {
           canBuy:
             (canUpgradeMaterial(inventory.swordLevelRed) && canAfford('red', swordCostRed)) ||
             inventory.weaponRed !== 'sword',
-        },
-        {
+        })
+      }
+      if (blueCanSword) {
+        items.push({
           id: 'swordBlue',
           title: materialUpgradeTitle('sword', inventory.swordLevelBlue),
-          desc: `B · 2 · ${swordDamageFor({ control: 'arrows' })} dmg`,
+          desc: `B · 1 · ${swordDamageFor({ control: 'arrows' })} dmg`,
           cost: canUpgradeMaterial(inventory.swordLevelBlue) ? swordCostBlue : 0,
           side: 'Blå',
           owned: inventory.swordLevelBlue,
           canBuy:
             (canUpgradeMaterial(inventory.swordLevelBlue) && canAfford('blue', swordCostBlue)) ||
             inventory.weaponBlue !== 'sword',
-        },
-        {
+        })
+      }
+      if (redCanBow) {
+        items.push({
           id: 'bowRed',
           title: materialUpgradeTitle('bow', inventory.bowLevelRed),
           desc: `R · Q · pil ${BOW_DAMAGE + inventory.bowLevelRed} dmg`,
@@ -3182,19 +3535,8 @@ function FightingBalls() {
           canBuy:
             (canUpgradeBow(inventory.bowLevelRed) && canAfford('red', bowCostRed)) ||
             (inventory.weaponRed !== 'bow' && inventory.weaponRed !== 'nokia'),
-        },
-        {
-          id: 'bowBlue',
-          title: materialUpgradeTitle('bow', inventory.bowLevelBlue),
-          desc: `B · 2 · pil ${BOW_DAMAGE + inventory.bowLevelBlue} dmg`,
-          cost: canUpgradeBow(inventory.bowLevelBlue) ? bowCostBlue : 0,
-          side: 'Blå',
-          owned: inventory.bowLevelBlue,
-          canBuy:
-            (canUpgradeBow(inventory.bowLevelBlue) && canAfford('blue', bowCostBlue)) ||
-            (inventory.weaponBlue !== 'bow' && inventory.weaponBlue !== 'nokia'),
-        },
-        {
+        })
+        items.push({
           id: 'nokiaRed',
           title: inventory.nokiaRed ? 'Nokia (utrustad)' : 'Nokia-pilbåge',
           desc: `R · Q · ${NOKIA_HIT_DAMAGE} + bränn · ring 112`,
@@ -3204,19 +3546,32 @@ function FightingBalls() {
           canBuy:
             inventory.weaponRed !== 'nokia' &&
             (inventory.nokiaRed || canAfford('red', NOKIA_COST)),
-        },
-        {
+        })
+      }
+      if (blueCanBow) {
+        items.push({
+          id: 'bowBlue',
+          title: materialUpgradeTitle('bow', inventory.bowLevelBlue),
+          desc: `B · 1 · pil ${BOW_DAMAGE + inventory.bowLevelBlue} dmg`,
+          cost: canUpgradeBow(inventory.bowLevelBlue) ? bowCostBlue : 0,
+          side: 'Blå',
+          owned: inventory.bowLevelBlue,
+          canBuy:
+            (canUpgradeBow(inventory.bowLevelBlue) && canAfford('blue', bowCostBlue)) ||
+            (inventory.weaponBlue !== 'bow' && inventory.weaponBlue !== 'nokia'),
+        })
+        items.push({
           id: 'nokiaBlue',
           title: inventory.nokiaBlue ? 'Nokia (utrustad)' : 'Nokia-pilbåge',
-          desc: `B · 2 · ${NOKIA_HIT_DAMAGE} + bränn · ring 112`,
+          desc: `B · 1 · ${NOKIA_HIT_DAMAGE} + bränn · ring 112`,
           cost: inventory.nokiaBlue ? 0 : shopPrice(NOKIA_COST),
           side: 'Blå',
           owned: inventory.nokiaBlue ? 1 : 0,
           canBuy:
             inventory.weaponBlue !== 'nokia' &&
             (inventory.nokiaBlue || canAfford('blue', NOKIA_COST)),
-        },
-      )
+        })
+      }
 
       const pistolCostRed = shopPrice(pistolUpgradeCost(inventory.pistolLevelRed))
       const pistolCostBlue = shopPrice(pistolUpgradeCost(inventory.pistolLevelBlue))
@@ -3274,7 +3629,7 @@ function FightingBalls() {
         items.push({
           id: 'pistolBlue',
           title,
-          desc: `B · 2 · ${preview.desc}`,
+          desc: `B · 1 · ${preview.desc}`,
           cost,
           side: 'Blå',
           owned: owned ? level : 0,
@@ -3298,7 +3653,7 @@ function FightingBalls() {
         {
           id: 'mcShieldBlue',
           title: 'Minecraft-sköld',
-          desc: `B · 1 · odödlig ${MC_SHIELD_DURATION / 1000}s`,
+          desc: `B · 2 · odödlig ${MC_SHIELD_DURATION / 1000}s`,
           cost: shopPrice(MC_SHIELD_COST),
           side: 'Blå',
           owned: inventory.mcShieldBlue,
@@ -3384,11 +3739,16 @@ function FightingBalls() {
       const rowH = 34
       const btnW = 78
       const btnH = 24
+      const ksRowH = rowH * 2
+      const ksBtnW = btnW * 2
+      const ksBtnH = btnH * 2
+      const ksBandH = ksRowH + 16
+      const listBottom = py + panelH - 48 - ksBandH
 
       // Mittstreck: blå vänster, röd höger
       ctx.beginPath()
       ctx.moveTo(midX, py + 72)
-      ctx.lineTo(midX, py + panelH - 48)
+      ctx.lineTo(midX, listBottom)
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)'
       ctx.lineWidth = 2
       ctx.stroke()
@@ -3411,6 +3771,7 @@ function FightingBalls() {
         }
         colItems.forEach((item, i) => {
           const y = startY + i * rowH
+          if (y + rowH > listBottom) return
           const bx = colX + colW - btnW
           const by = y + 8
 
@@ -3445,6 +3806,53 @@ function FightingBalls() {
 
       drawShopColumn(blueItems, px + colPad)
       drawShopColumn(redItems, midX + colPad)
+
+      // Killstreak längst ner, dubbelt så stor
+      const ksY = listBottom + 8
+      function drawKillstreakSlot(side, colX, itemId) {
+        const kills =
+          side === 'red' ? inventory.killstreakKillsRed : inventory.killstreakKillsBlue
+        const spins =
+          side === 'red' ? inventory.killstreakSpinsRed : inventory.killstreakSpinsBlue
+        const jack = jackpotChancePct(kills)
+        const bx = colX + colW - ksBtnW
+        const by = ksY + (ksRowH - ksBtnH) * 0.5
+
+        ctx.fillStyle = side === 'red' ? 'rgba(255,107,90,0.12)' : 'rgba(94,200,255,0.12)'
+        ctx.strokeStyle = side === 'red' ? '#ff6b5a' : '#5ec8ff'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(colX - 4, ksY, colW + 8, ksRowH, 10)
+        } else {
+          ctx.rect(colX - 4, ksY, colW + 8, ksRowH)
+        }
+        ctx.fill()
+        ctx.stroke()
+
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'middle'
+        ctx.fillStyle = '#ffe9a0'
+        ctx.font = 'bold 18px Syne, sans-serif'
+        ctx.fillText(`Killstreak ×${kills}`, colX + 6, ksY + ksRowH * 0.35)
+        ctx.fillStyle = 'rgba(255,255,255,0.7)'
+        ctx.font = '12px Figtree, sans-serif'
+        ctx.fillText(`snurr ${spins} · jackpot ~${jack}%`, colX + 6, ksY + ksRowH * 0.68)
+
+        ctx.fillStyle = '#f0c040'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(bx, by, ksBtnW, ksBtnH, 10)
+        else ctx.rect(bx, by, ksBtnW, ksBtnH)
+        ctx.fill()
+        ctx.fillStyle = '#2a1c08'
+        ctx.font = 'bold 16px Figtree, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText('ÖPPNA', bx + ksBtnW * 0.5, by + ksBtnH * 0.5)
+        shopHits.push({ x: bx, y: by, w: ksBtnW, h: ksBtnH, id: itemId })
+      }
+      drawKillstreakSlot('blue', px + colPad, 'killstreakBlue')
+      drawKillstreakSlot('red', midX + colPad, 'killstreakRed')
 
       const cxBtn = width * 0.5
       const cyBtn = py + panelH - 28
@@ -3543,8 +3951,9 @@ function FightingBalls() {
     function buyShopItem(id) {
       if (!shopOpen) return
       if (id === 'swordRed') {
+        if (inventory.startWeaponRed === 'bow') return
         if (canUpgradeMaterial(inventory.swordLevelRed)) {
-          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.swordLevelRed)
+          const price = linearWeaponUpgradeCost(inventory.swordLevelRed)
           if (!payCoins('red', price)) return
           inventory.swordLevelRed += 1
           inventory.weaponRed = 'sword'
@@ -3555,8 +3964,9 @@ function FightingBalls() {
         return
       }
       if (id === 'swordBlue') {
+        if (inventory.startWeaponBlue === 'bow') return
         if (canUpgradeMaterial(inventory.swordLevelBlue)) {
-          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.swordLevelBlue)
+          const price = linearWeaponUpgradeCost(inventory.swordLevelBlue)
           if (!payCoins('blue', price)) return
           inventory.swordLevelBlue += 1
           inventory.weaponBlue = 'sword'
@@ -3567,8 +3977,9 @@ function FightingBalls() {
         return
       }
       if (id === 'bowRed') {
+        if (inventory.startWeaponRed === 'sword') return
         if (canUpgradeBow(inventory.bowLevelRed)) {
-          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelRed)
+          const price = linearWeaponUpgradeCost(inventory.bowLevelRed)
           if (!payCoins('red', price)) return
           inventory.bowLevelRed += 1
           inventory.weaponRed = 'bow'
@@ -3579,8 +3990,9 @@ function FightingBalls() {
         return
       }
       if (id === 'bowBlue') {
+        if (inventory.startWeaponBlue === 'sword') return
         if (canUpgradeBow(inventory.bowLevelBlue)) {
-          const price = weaponUpgradeCost(UPGRADE_BASE_COST, inventory.bowLevelBlue)
+          const price = linearWeaponUpgradeCost(inventory.bowLevelBlue)
           if (!payCoins('blue', price)) return
           inventory.bowLevelBlue += 1
           inventory.weaponBlue = 'bow'
@@ -3591,6 +4003,7 @@ function FightingBalls() {
         return
       }
       if (id === 'nokiaRed') {
+        if (inventory.startWeaponRed === 'sword') return
         if (inventory.weaponRed === 'nokia') return
         if (!inventory.nokiaRed) {
           if (!payCoins('red', NOKIA_COST)) return
@@ -3600,12 +4013,21 @@ function FightingBalls() {
         return
       }
       if (id === 'nokiaBlue') {
+        if (inventory.startWeaponBlue === 'sword') return
         if (inventory.weaponBlue === 'nokia') return
         if (!inventory.nokiaBlue) {
           if (!payCoins('blue', NOKIA_COST)) return
           inventory.nokiaBlue = true
         }
         inventory.weaponBlue = 'nokia'
+        return
+      }
+      if (id === 'killstreakRed') {
+        openKillstreak('red')
+        return
+      }
+      if (id === 'killstreakBlue') {
+        openKillstreak('blue')
         return
       }
       if (id === 'pistolRed') {
@@ -3938,6 +4360,15 @@ function FightingBalls() {
       ctx.font = 'bold 16px Figtree, sans-serif'
       ctx.fillStyle = 'rgba(255,255,255,0.55)'
       ctx.fillText(`först till ${WIN_SCORE} · shop 10/15/20… · boss ${BOSS_SCORE}`, width * 0.5, 28)
+
+      if (killstreakMessage && performance.now() < killstreakMessageUntil) {
+        ctx.font = 'bold 20px Figtree, sans-serif'
+        ctx.fillStyle = '#f0c040'
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)'
+        ctx.lineWidth = 4
+        ctx.strokeText(killstreakMessage, width * 0.5, 56)
+        ctx.fillText(killstreakMessage, width * 0.5, 56)
+      }
       ctx.restore()
     }
 
@@ -4010,10 +4441,20 @@ function FightingBalls() {
       inventory.sniperBlue = false
       inventory.mcShieldRed = 0
       inventory.mcShieldBlue = 0
+      inventory.killstreakKillsRed = 0
+      inventory.killstreakKillsBlue = 0
+      inventory.killstreakSpinsRed = 0
+      inventory.killstreakSpinsBlue = 0
       inventory.lifeDrinkRed = 0
       inventory.lifeDrinkBlue = 0
       inventory.susRed = 0
       inventory.susBlue = 0
+      killstreakMessage = ''
+      killstreakMessageUntil = 0
+      killstreakOpen = false
+      killstreakSide = null
+      ksSpinning = false
+      ksPendingPrize = null
       otisPower = false
       nerminPower = false
       farts.length = 0
@@ -4079,23 +4520,23 @@ function FightingBalls() {
 
       const blueW = inventory.weaponBlue
       const blueLabel = nerminPower && blueW !== 'rpg' && blueW !== 'sniper' && blueW !== 'bow' && blueW !== 'nokia' && blueW !== 'pistol'
-        ? 'Armar/ben · 2'
+        ? 'Armar/ben · 1'
         : blueW === 'sniper'
-          ? 'Sniper · 2'
+          ? 'Sniper · 1'
           : blueW === 'rpg'
-            ? 'RPG · 2'
+            ? 'RPG · 1'
             : blueW === 'pistol'
-              ? 'Pistol · 2'
+              ? 'Pistol · 1'
               : blueW === 'bow'
-                ? 'Pilbåge · 2'
+                ? 'Pilbåge · 1'
                 : blueW === 'sword'
-                  ? 'Svärd · 2'
+                  ? 'Svärd · 1'
                   : blueW === 'nokia'
-                    ? 'Nokia · 2'
+                    ? 'Nokia · 1'
                     : blueW === 'knife'
-                      ? 'Kniv · 2'
+                      ? 'Kniv · 1'
                       : blueW === 'ping'
-                        ? 'Pingis · 2'
+                        ? 'Pingis · 1'
                         : ''
       if (blueLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
@@ -4976,7 +5417,7 @@ function FightingBalls() {
           return
         }
 
-        if (shopOpen || codesOpen || weaponSelectOpen || nokiaDialOpen) {
+        if (shopOpen || codesOpen || weaponSelectOpen || nokiaDialOpen || killstreakOpen) {
           last = now
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
           ctx.clearRect(0, 0, width, height)
@@ -5015,6 +5456,7 @@ function FightingBalls() {
           drawCodes()
           drawWeaponSelect()
           drawNokiaDial()
+          drawKillstreakWheel()
           return
         }
 
@@ -5147,6 +5589,7 @@ function FightingBalls() {
         drawCodes()
         drawWeaponSelect()
         drawNokiaDial()
+        drawKillstreakWheel()
 
         if (flash > 0.02) {
           ctx.fillStyle = `rgba(255,250,230,${flash * 0.35})`
@@ -5212,6 +5655,10 @@ function FightingBalls() {
     function onKeyDown(e) {
       const k = e.key.toLowerCase()
       if (k === 'escape') {
+        if (killstreakOpen) {
+          closeKillstreak()
+          return
+        }
         closeShop()
         closeCodes()
         closeNokiaDial()
@@ -5343,13 +5790,13 @@ function FightingBalls() {
       if ((k === '1' || e.code === 'Digit1' || e.code === 'Numpad1') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
-        if (blue) useMcShield(blue, 'blue')
+        if (blue) swingKnife(blue)
         return
       }
       if ((k === '2' || e.code === 'Digit2' || e.code === 'Numpad2') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
-        if (blue) swingKnife(blue)
+        if (blue) useMcShield(blue, 'blue')
         return
       }
       if ((k === '3' || e.code === 'Digit3' || e.code === 'Numpad3') && !e.repeat) {
@@ -5447,6 +5894,17 @@ function FightingBalls() {
         return
       }
 
+      if (killstreakOpen) {
+        for (let i = killstreakHits.length - 1; i >= 0; i -= 1) {
+          const hit = killstreakHits[i]
+          if (!hitRect(px, py, hit)) continue
+          if (hit.id === 'spin') startKillstreakSpin()
+          else if (hit.id === 'close') closeKillstreak()
+          return
+        }
+        return
+      }
+
       if (shopOpen) {
         for (let i = shopHits.length - 1; i >= 0; i -= 1) {
           const hit = shopHits[i]
@@ -5484,6 +5942,9 @@ function FightingBalls() {
       let over = hitRect(px, py, shopButton) || hitRect(px, py, codesButton)
       if (inventory.nokiaRed && hitRect(px, py, nokiaDialButtonRed)) over = true
       if (inventory.nokiaBlue && hitRect(px, py, nokiaDialButtonBlue)) over = true
+      if (killstreakOpen) {
+        over = killstreakHits.some((h) => hitRect(px, py, h)) || true
+      }
       if (shopOpen) {
         over = shopHits.some((h) => hitRect(px, py, h))
       }
