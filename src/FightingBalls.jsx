@@ -25,7 +25,10 @@ const LIFE_DRINK_HEAL = 5
 const KNIFE_DAMAGE = 4
 const KNIFE_COOLDOWN = 450
 const KNIFE_SWING_MS = 280
-const KNIFE_REACH = 28
+const KNIFE_REACH = 58
+const MELEE_HIT_PAD = 22
+const MELEE_ARC = 1.15 // radianer · träff-vinkel under sving
+const PROJECTILE_HIT_PAD = 30
 const KNIFE_COST = 5
 const MATERIAL_TIERS = ['wood', 'stone', 'iron', 'diamond']
 const MATERIAL_LABELS = {
@@ -42,17 +45,17 @@ const MATERIAL_COLORS = {
 }
 const UPGRADE_BASE_COST = 5 // 5 → 10 → 20 → 40
 const MAX_MATERIAL_LEVEL = 4 // trä + 4 köp (sista kostar 40); utseende cap på diamant
-const SWORD_DAMAGE = 2
+const SWORD_DAMAGE = 3
 const SWORD_COOLDOWN = 420
 const SWORD_SWING_MS = 280
-const SWORD_REACH = 56
+const SWORD_REACH = 96
 const BOW_DAMAGE = 2 // Lv0=2, uppgraderingar → 3,4,5,6,7,8
 const BOW_MAX_LEVEL = 6 // 2 + 6 = 8 dmg
 const BOW_COOLDOWN = 700
 const BOW_DRAW_MS = 200
 const BOW_ARROW_SPEED = 10
-const BOW_ARROW_RADIUS = 6
-const NOKIA_COST = 100
+const BOW_ARROW_RADIUS = 10
+const NOKIA_COST = 1000
 const NOKIA_HIT_DAMAGE = 5 // första träffen / explosionen
 const NOKIA_FIRE_DAMAGE = 1 // eld-DoT på spelaren
 const NOKIA_FIRE_TICK_MS = 500
@@ -62,6 +65,13 @@ const NOKIA_RADIUS = 14
 const NOKIA_PROXIMITY = 70 // exploderar nära fiende
 const NOKIA_BLAST = 95
 const NOKIA_DIAL_CODE = '112'
+const LEON_DIAL_CODE = '123'
+const LEON_MAX_SAFE_CALLS = 1 // 1:a gången mot fiende · 2:a+ mot dig
+const LEON_FOOTBALL_DAMAGE = 100
+const LEON_SPEED = 9
+const LEON_RADIUS = 28
+const LEON_BALL_SPEED = 14
+const LEON_BALL_RADIUS = 14
 const POLICE_REWARD = 9999
 const POLICE_SPEED = 10
 const POLICE_RADIUS = 26
@@ -75,7 +85,7 @@ const PISTOL_COST = 20
 const PISTOL_COOLDOWN = 320
 const PISTOL_DRAW_MS = 160
 const PISTOL_SPEED = 16
-const PISTOL_RADIUS = 4
+const PISTOL_RADIUS = 8
 const KNIFE_SHOP_COST = KNIFE_COST
 const OTIS_CODE = 'ötis'
 const OTIS_DAMAGE = 100
@@ -83,6 +93,8 @@ const NERMIN_CODE = 'nermin'
 const NERMIN_DAMAGE = 100
 const NERMIN_SCALE = 1.55
 const ALI_CODE = 'ali'
+const GRON_BOSS_CODE = 'grön boss'
+const MJOLK_CODE = 'mjölk'
 const RPG_DAMAGE = 5 // Lv5=5, Lv6=6, Lv7=7, Lv8=8
 const RPG_FIRE_DAMAGE = 1 // eld per sekund
 const RPG_FIRE_TICK_MS = 1000
@@ -93,31 +105,31 @@ const RPG_PROXIMITY = 75
 const RPG_BLAST = 110
 const RPG_COOLDOWN = 1400
 const RPG_DRAW_MS = 320
-const SNIPER_DAMAGE = 15
-const SNIPER_COOLDOWN = 9000
+const SNIPER_DAMAGE = 50 // belöning från grön boss
+const SNIPER_COOLDOWN = 6000
 const SNIPER_DRAW_MS = 420
 const SNIPER_SPEED = 24
-const SNIPER_RADIUS = 3
+const SNIPER_RADIUS = 7
 const LIMB_COOLDOWN = 380
 const LIMB_SWING_MS = 300
-const LIMB_REACH = 48
+const LIMB_REACH = 78
 const FOOT_COST = 10
 const FOOT_DAMAGE = 3
 const FOOT_COOLDOWN = 500
 const FOOT_SWING_MS = 280
-const FOOT_REACH = 36
+const FOOT_REACH = 64
 const PING_COST = 10
 const PING_DAMAGE = 2
 const PING_COOLDOWN = 400
 const PING_SPEED = 15
-const PING_RADIUS = 8
+const PING_RADIUS = 12
 const SPEAR_DAMAGE = 3
 const SPEAR_COOLDOWN = 500
 const SPEAR_SWING_MS = 420
 // Visuell + hitbox: tip = r*(SPEAR_BASE + thrustPeak*sin), samma som draw
 const SPEAR_BASE = 3.2
 const SPEAR_THRUST = 0.55
-const SPEAR_WIDTH = 52
+const SPEAR_WIDTH = 78
 const GOLD_BOMB_DAMAGE = 5
 const GOLD_BOMB_COOLDOWN = 700
 const GOLD_BOMB_FUSE_MS = 800
@@ -127,11 +139,11 @@ const BODYGUARD_TICK_MS = 1000
 const BODYGUARD_SPEED = 11
 const BODYGUARD_RADIUS = 18
 const BODYGUARD_COST = 5
-const SUS_COST = 10
+const SUS_COST = 25
 const SUS_DAMAGE = 5
 const SUS_TICK_MS = 1000
 const SUS_DURATION_MS = 10000
-const MOGGER_COST = 15
+const MOGGER_COST = 25
 const MOGGER_DURATION_MS = 15000
 const MOGGER_DAMAGE = 5
 const MOGGER_TICK_MS = 1000
@@ -153,7 +165,7 @@ const RESPAWN_LIVES = 10
 const RESPAWN_LIVES_BLUE = 10
 const RESPAWN_COUNTDOWN_MS = 3000
 const WIN_SCORE = 100
-const BOSS_SCORE = 10
+const BOSS_SCORE = 15
 const SHOP_MILESTONE_START = 10
 const SHOP_MILESTONE_STEP = 5
 const SHOP_MILESTONE_MAX = 100
@@ -161,7 +173,7 @@ const WIN_COIN_REWARD = 999
 const SECRET_CODE = '6655'
 const SECRET_CODE_REWARD = 30
 const SECRET_CODE_MAX_USES = 3
-const BOSS_HP = 167
+const BOSS_HP = 500
 const BOSS_DAMAGE = 3
 const BOSS_TOUCH_DAMAGE = 2
 const BOSS_RESPAWNS = 5
@@ -171,6 +183,34 @@ const BOSS_MAX_SPEED = 4.2
 const BOSS_ACCEL = 0.32
 const BOSS_KILL_REWARD = 50
 const BOSS_SKIP_REWARD = 10
+const BOSS_FLASK_COOLDOWN = 2000
+const BOSS_FLASK_SPEED = 9
+const BOSS_FLASK_RADIUS = 10
+const BOSS_POOL_DURATION_MS = 4000
+const BOSS_POOL_RADIUS = 348
+const BOSS_POOL_DAMAGE = 5
+const BOSS_POOL_TICK_MS = 500
+const BOSS_COLOR = '#16a34a'
+const BOSS_GLOW = '#86efac'
+const EVENT_PISTOL_AT = 5
+const EVENT_PISTOL_END = 10
+const EVENT_PISTOL_DAMAGE = 2
+const SCORE_WHEEL_AT = 10
+const SCORE_REWARD_LOSE_AT = 14
+const HAMMER_DAMAGE = 5
+const HAMMER_COOLDOWN = 420
+const HAMMER_SWING_MS = 300
+const HAMMER_REACH = 78
+const WALL_LEN = 78
+const WALL_THICK = 18
+const SCORE_WHEEL_SEGMENTS = [
+  { id: 'nuke', label: 'NUKE', rarity: 'jackpot', color: '#ef4444' },
+  { id: 'hammer', label: 'Hammare', rarity: 'better', color: '#a16207' },
+  { id: 'coins25', label: '+25 🪙', rarity: 'good', color: '#eab308' },
+  { id: 'lifeDrink', label: 'Livedryck', rarity: 'good', color: '#22c55e' },
+  { id: 'sus', label: 'Sus', rarity: 'common', color: '#16a34a' },
+  { id: 'mcShield', label: 'MC-sköld', rarity: 'common', color: '#0ea5e9' },
+]
 
 const PALETTE = [
   { color: '#ff4d3a', glow: '#ff8a70' },
@@ -208,6 +248,29 @@ function FightingBalls() {
     const bodyguards = []
     const farts = []
     const policeUnits = []
+    const leonUnits = []
+    const footballs = []
+    const poisonFlasks = []
+    const poisonPools = []
+    const walls = []
+    let leonCallsRed = 0
+    let leonCallsBlue = 0
+    let eventPistolActive = false
+    let eventPistolGranted = false
+    let scoreWheelOpen = false
+    let scoreWheelSide = null
+    const scoreWheelHits = []
+    let swAngle = 0
+    let swSpinning = false
+    let swSpinStart = 0
+    let swSpinDuration = 3200
+    let swFromAngle = 0
+    let swToAngle = 0
+    let swPending = null
+    let swResultLabel = ''
+    let swResultUntil = 0
+    let swNeedSpin = false
+    let pendingScoreWheel = null
     let shake = 0
     let flash = 0
     let cheer = 0
@@ -261,6 +324,7 @@ function FightingBalls() {
     let shopFree = false
     let otisPower = false
     let nerminPower = false
+    let codesLockedExceptBoss = false
     let nokiaDialOpen = false
     let nokiaDialSide = null // 'red' | 'blue'
     let nokiaDialInput = ''
@@ -304,6 +368,12 @@ function FightingBalls() {
       lifeDrinkBlue: 0,
       susRed: 0,
       susBlue: 0,
+      scoreRewardRed: null, // 'nuke' | 'hammer' | ...
+      scoreRewardBlue: null,
+      scoreWheelDoneRed: false,
+      scoreWheelDoneBlue: false,
+      nukeUsedRed: false,
+      nukeUsedBlue: false,
     }
 
     const fighters = []
@@ -353,6 +423,7 @@ function FightingBalls() {
         spearSwingUntil: 0,
         spearAngle: 0,
         spearDidHit: false,
+        meleeDidHit: false,
         eliminated: false,
         respawnAt: 0,
         burnUntil: 0,
@@ -363,6 +434,7 @@ function FightingBalls() {
         burnLeaveOne: false,
         kidnapped: false,
         kidnapUntil: 0,
+        flaskReadyAt: 0,
       }
     }
 
@@ -374,6 +446,8 @@ function FightingBalls() {
       bodyguards.length = 0
       farts.length = 0
       policeUnits.length = 0
+      leonUnits.length = 0
+      footballs.length = 0
       fighters.push(
         makeFighter(cx - arenaR * 0.25, cy, 0, 0, 0, true),
         makeFighter(cx + arenaR * 0.25, cy, 0, 0, 1, false),
@@ -798,11 +872,31 @@ function FightingBalls() {
       ball.x += ball.vx * dt
       ball.y += ball.vy * dt
       keepInArena(ball)
+      resolveWallCollisions(ball)
+      keepInArena(ball)
       ball.squash *= 0.86
 
       if (ball.knifeSwingUntil && now >= ball.knifeSwingUntil) {
         ball.knifeSwingUntil = 0
         ball.knifeEquipped = false
+        ball.meleeDidHit = false
+      } else if (
+        ball.knifeSwingUntil &&
+        now < ball.knifeSwingUntil &&
+        !ball.meleeDidHit &&
+        !ball.eliminated &&
+        !ball.isBoss
+      ) {
+        const mk = ball.meleeKind
+        if (
+          mk === 'knife' ||
+          mk === 'sword' ||
+          mk === 'hammer' ||
+          mk === 'foot' ||
+          mk === 'limb'
+        ) {
+          updateMeleeHit(ball, now)
+        }
       }
       if (
         !ball.eliminated &&
@@ -823,6 +917,119 @@ function FightingBalls() {
         !ball.spearDidHit
       ) {
         updateSpearHit(ball, now)
+      }
+
+      if (ball.isBoss && !ball.eliminated) tryBossFlaskThrow(ball, now)
+    }
+
+    function randomArenaGroundPoint() {
+      const ang = Math.random() * Math.PI * 2
+      const rad = Math.random() * Math.max(40, arenaR * 0.72)
+      return { x: cx + Math.cos(ang) * rad, y: cy + Math.sin(ang) * rad }
+    }
+
+    function tryBossFlaskThrow(boss, now = performance.now()) {
+      if (!boss || !boss.isBoss || boss.eliminated) return
+      if (now < (boss.flaskReadyAt || 0)) return
+      boss.flaskReadyAt = now + BOSS_FLASK_COOLDOWN
+      const target = randomArenaGroundPoint()
+      const dx = target.x - boss.x
+      const dy = target.y - boss.y
+      const dist = Math.hypot(dx, dy) || 1
+      poisonFlasks.push({
+        x: boss.x,
+        y: boss.y,
+        vx: (dx / dist) * BOSS_FLASK_SPEED,
+        vy: (dy / dist) * BOSS_FLASK_SPEED,
+        r: BOSS_FLASK_RADIUS,
+        life: 2.8,
+        tx: target.x,
+        ty: target.y,
+      })
+      boss.squash = Math.max(boss.squash, 0.25)
+    }
+
+    function landPoisonFlask(f) {
+      poisonPools.push({
+        x: f.tx ?? f.x,
+        y: f.ty ?? f.y,
+        r: BOSS_POOL_RADIUS,
+        expiresAt: performance.now() + BOSS_POOL_DURATION_MS,
+        nextTick: performance.now() + BOSS_POOL_TICK_MS,
+      })
+      spawnBurst(f.tx ?? f.x, f.ty ?? f.y, 0.9)
+    }
+
+    function updatePoisonFlasks(dt) {
+      for (let i = poisonFlasks.length - 1; i >= 0; i -= 1) {
+        const f = poisonFlasks[i]
+        f.x += f.vx * dt
+        f.y += f.vy * dt
+        f.life -= dt / 60
+        const toTarget = Math.hypot(f.tx - f.x, f.ty - f.y)
+        if (toTarget < 14 || f.life <= 0) {
+          landPoisonFlask(f)
+          poisonFlasks.splice(i, 1)
+        }
+      }
+    }
+
+    function updatePoisonPools(dt, now = performance.now()) {
+      for (let i = poisonPools.length - 1; i >= 0; i -= 1) {
+        const p = poisonPools[i]
+        if (now >= p.expiresAt) {
+          poisonPools.splice(i, 1)
+          continue
+        }
+        if (now < p.nextTick) continue
+        p.nextTick = now + BOSS_POOL_TICK_MS
+        for (let j = 0; j < fighters.length; j += 1) {
+          const f = fighters[j]
+          if (!f || f.eliminated || f.isBoss || f.lives <= 0) continue
+          if (Math.hypot(f.x - p.x, f.y - p.y) > p.r + getRadius(f)) continue
+          if (isShielded(f, now)) continue
+          f.lives -= BOSS_POOL_DAMAGE
+          f.squash = Math.max(f.squash, 0.35)
+        }
+      }
+    }
+
+    function drawPoisonFlasks() {
+      for (let i = 0; i < poisonFlasks.length; i += 1) {
+        const f = poisonFlasks[i]
+        ctx.save()
+        ctx.translate(f.x, f.y)
+        ctx.rotate(Math.atan2(f.vy, f.vx))
+        ctx.fillStyle = '#22c55e'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(-f.r * 0.7, -f.r * 1.2, f.r * 1.4, f.r * 2.2, 4)
+        } else {
+          ctx.rect(-f.r * 0.7, -f.r * 1.2, f.r * 1.4, f.r * 2.2)
+        }
+        ctx.fill()
+        ctx.fillStyle = '#bbf7d0'
+        ctx.beginPath()
+        ctx.arc(0, -f.r * 1.05, f.r * 0.35, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      }
+    }
+
+    function drawPoisonPools(now = performance.now()) {
+      for (let i = 0; i < poisonPools.length; i += 1) {
+        const p = poisonPools[i]
+        const life = Math.max(0, (p.expiresAt - now) / BOSS_POOL_DURATION_MS)
+        const pulse = 1 + Math.sin(now * 0.01 + p.x) * 0.04
+        ctx.save()
+        ctx.fillStyle = `rgba(34, 197, 94, ${0.22 + life * 0.28})`
+        ctx.beginPath()
+        ctx.ellipse(p.x, p.y, p.r * pulse, p.r * 0.72 * pulse, 0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.strokeStyle = `rgba(187, 247, 208, ${0.35 + life * 0.4})`
+        ctx.lineWidth = 3
+        ctx.stroke()
+        ctx.restore()
       }
     }
 
@@ -855,7 +1062,7 @@ function FightingBalls() {
       const nx = Math.cos(angle)
       const ny = Math.sin(angle)
       const tipLen = spearTipLength(attacker, now)
-      const hitPad = SPEAR_WIDTH + tr * 0.15
+      const hitPad = SPEAR_WIDTH + tr * 0.7 + MELEE_HIT_PAD
 
       // Skaft från bollens framkant till spets (samma som draw)
       const ax = attacker.x + nx * (ar * 0.35)
@@ -866,7 +1073,7 @@ function FightingBalls() {
       const toTx = target.x - attacker.x
       const toTy = target.y - attacker.y
       const along = toTx * nx + toTy * ny
-      if (along < -tr * 0.4) return false
+      if (along < -tr * 0.6) return false
       if (along > tipLen + tr + hitPad) return false
 
       const shaftDist = distPointToSegment(target.x, target.y, ax, ay, bx, by)
@@ -927,6 +1134,10 @@ function FightingBalls() {
 
     function getSideWeapon(attacker) {
       if (!attacker) return 'bow'
+      if (eventPistolActive) return 'pistol'
+      const side = isRedSide(attacker) ? 'red' : 'blue'
+      const reward = side === 'red' ? inventory.scoreRewardRed : inventory.scoreRewardBlue
+      if (reward === 'hammer') return 'hammer'
       if (attacker.player || attacker.control === 'wasd' || attacker._bossSide === 'red') {
         return inventory.weaponRed || 'bow'
       }
@@ -1042,6 +1253,14 @@ function FightingBalls() {
           reach: SWORD_REACH,
         }
       }
+      if (kind === 'hammer') {
+        return {
+          damage: HAMMER_DAMAGE,
+          cooldown: HAMMER_COOLDOWN,
+          swingMs: HAMMER_SWING_MS,
+          reach: HAMMER_REACH,
+        }
+      }
       return {
         damage: nerminPower ? NERMIN_DAMAGE : KNIFE_DAMAGE,
         cooldown: KNIFE_COOLDOWN,
@@ -1065,7 +1284,14 @@ function FightingBalls() {
 
     function tryReturnPingBall(attacker, kind) {
       if (!attacker || attacker.eliminated) return false
-      const reachExtra = kind === 'foot' ? FOOT_REACH + 18 : kind === 'ping' ? 44 : 0
+      const reachExtra =
+        kind === 'foot'
+          ? FOOT_REACH + 28
+          : kind === 'ping'
+            ? 60
+            : kind === 'sword' || kind === 'hammer' || kind === 'knife' || kind === 'limb'
+              ? 48
+              : 0
       if (!reachExtra) return false
       const ar = getRadius(attacker)
       let best = null
@@ -1266,10 +1492,11 @@ function FightingBalls() {
       const angle = aimAtOpponent(attacker)
       const nx = Math.cos(angle)
       const ny = Math.sin(angle)
-      const level = pistolLevelFor(attacker)
-      const dmg = pistolDamageFor(attacker)
+      const event = eventPistolActive
+      const level = event ? 0 : pistolLevelFor(attacker)
+      const dmg = event ? EVENT_PISTOL_DAMAGE : pistolDamageFor(attacker)
 
-      attacker.knifeReadyAt = now + PISTOL_COOLDOWN
+      attacker.knifeReadyAt = event ? now : now + PISTOL_COOLDOWN
       attacker.knifeEquipped = true
       attacker.knifeSwingUntil = now + PISTOL_DRAW_MS
       attacker.meleeKind = 'pistol'
@@ -1285,11 +1512,12 @@ function FightingBalls() {
         vy: ny * PISTOL_SPEED + attacker.vy * 0.15,
         r: PISTOL_RADIUS,
         angle,
-        life: 2.2,
+        life: event ? 3.2 : 2.2,
         owner: attacker,
         damage: dmg,
         level,
         pistol: true,
+        homing: event,
       })
       spawnBurst(attacker.x + nx * getRadius(attacker), attacker.y + ny * getRadius(attacker), 0.25)
     }
@@ -1580,9 +1808,275 @@ function FightingBalls() {
         }
         return
       }
+      if (typed === LEON_DIAL_CODE) {
+        if (spawnLeon(nokiaDialSide)) {
+          nokiaDialInput = ''
+          closeNokiaDial()
+        } else {
+          nokiaDialInput = ''
+        }
+        return
+      }
       nokiaDialMessage = 'Fel nummer'
       nokiaDialMessageUntil = performance.now() + 1500
       nokiaDialInput = ''
+    }
+
+    function spawnLeon(ownerSide) {
+      const owner =
+        ownerSide === 'red'
+          ? fighters.find((f) => (f.player || f.control === 'wasd') && !f.eliminated)
+          : fighters.find((f) => f.control === 'arrows' && !f.eliminated)
+      if (!owner) {
+        nokiaDialMessage = 'Ingen Leon-ägare'
+        nokiaDialMessageUntil = performance.now() + 2000
+        return false
+      }
+      const calls = ownerSide === 'red' ? leonCallsRed : leonCallsBlue
+      const angry = calls >= LEON_MAX_SAFE_CALLS
+      if (ownerSide === 'red') leonCallsRed += 1
+      else leonCallsBlue += 1
+
+      let target = null
+      if (angry) {
+        target = owner
+        nokiaDialMessage = 'Leon arg! Boll på DIG'
+        nokiaDialMessageUntil = performance.now() + 2800
+      } else {
+        target = bossMode
+          ? fighters.find((f) => f.isBoss && !f.eliminated)
+          : fighters.find((f) => f !== owner && !f.eliminated && !f.isBoss)
+        if (!target) {
+          nokiaDialMessage = 'Ingen att sparka på'
+          nokiaDialMessageUntil = performance.now() + 2000
+          if (ownerSide === 'red') leonCallsRed = Math.max(0, leonCallsRed - 1)
+          else leonCallsBlue = Math.max(0, leonCallsBlue - 1)
+          return false
+        }
+        nokiaDialMessage = '123! Leon · Messi-tröja'
+        nokiaDialMessageUntil = performance.now() + 2800
+      }
+
+      const ang = Math.atan2(owner.y - cy, owner.x - cx) + Math.PI
+      const spawnAng = ang + (Math.random() - 0.5) * 0.6
+      leonUnits.push({
+        x: cx + Math.cos(spawnAng) * (arenaR * 0.92),
+        y: cy + Math.sin(spawnAng) * (arenaR * 0.92),
+        vx: 0,
+        vy: 0,
+        r: LEON_RADIUS,
+        owner,
+        ownerSide,
+        target,
+        angry,
+        phase: 'run',
+        face: 1,
+        life: 8,
+      })
+      spawnBurst(owner.x, owner.y, 1.4)
+      triggerCheer()
+      flash = Math.min(0.55, flash + 0.2)
+      return true
+    }
+
+    function kickFootball(leon) {
+      if (!leon || !leon.target || leon.target.eliminated) return
+      const t = leon.target
+      const dx = t.x - leon.x
+      const dy = t.y - leon.y
+      const dist = Math.hypot(dx, dy) || 1
+      const nx = dx / dist
+      const ny = dy / dist
+      footballs.push({
+        x: leon.x + nx * (leon.r + LEON_BALL_RADIUS),
+        y: leon.y + ny * (leon.r + LEON_BALL_RADIUS),
+        vx: nx * LEON_BALL_SPEED,
+        vy: ny * LEON_BALL_SPEED,
+        r: LEON_BALL_RADIUS,
+        damage: LEON_FOOTBALL_DAMAGE,
+        owner: leon.owner,
+        angry: leon.angry,
+        life: 4,
+        spin: 0,
+      })
+      spawnBurst(leon.x + nx * leon.r, leon.y + ny * leon.r, 1.6)
+      shake = Math.min(16, shake + 7)
+    }
+
+    function updateLeon(dt) {
+      for (let i = leonUnits.length - 1; i >= 0; i -= 1) {
+        const L = leonUnits[i]
+        L.life -= dt * 0.02
+        if (L.life <= 0 || !L.target || L.target.eliminated) {
+          leonUnits.splice(i, 1)
+          continue
+        }
+        if (L.phase === 'run') {
+          const aimX = L.target.x
+          const aimY = L.target.y
+          const dx = aimX - L.x
+          const dy = aimY - L.y
+          const dist = Math.hypot(dx, dy) || 1
+          L.vx += (dx / dist) * 0.75 * dt
+          L.vy += (dy / dist) * 0.75 * dt
+          const sp = Math.hypot(L.vx, L.vy)
+          if (sp > LEON_SPEED) {
+            L.vx = (L.vx / sp) * LEON_SPEED
+            L.vy = (L.vy / sp) * LEON_SPEED
+          }
+          L.x += L.vx * dt
+          L.y += L.vy * dt
+          L.face = L.vx >= 0 ? 1 : -1
+          const kickDist = getRadius(L.target) + L.r + 55
+          if (dist < kickDist) {
+            kickFootball(L)
+            L.phase = 'leave'
+            L.leaveAng = Math.atan2(L.y - cy, L.x - cx)
+            L.life = Math.min(L.life, 2.2)
+            spawnBurst(L.x, L.y, 1.2)
+          }
+        } else if (L.phase === 'leave') {
+          const ang = L.leaveAng || Math.atan2(L.y - cy, L.x - cx)
+          L.vx = Math.cos(ang) * LEON_SPEED * 1.35
+          L.vy = Math.sin(ang) * LEON_SPEED * 1.35
+          L.x += L.vx * dt
+          L.y += L.vy * dt
+          L.face = L.vx >= 0 ? 1 : -1
+          if (Math.hypot(L.x - cx, L.y - cy) > arenaR + 80) {
+            leonUnits.splice(i, 1)
+          }
+        }
+      }
+    }
+
+    function updateFootballs(dt) {
+      for (let i = footballs.length - 1; i >= 0; i -= 1) {
+        const b = footballs[i]
+        const prevX = b.x
+        const prevY = b.y
+        b.x += b.vx * dt
+        b.y += b.vy * dt
+        b.spin += 0.55 * dt
+        b.life -= dt * 0.02
+        if (Math.hypot(b.x - cx, b.y - cy) > arenaR + 60 || b.life <= 0) {
+          footballs.splice(i, 1)
+          continue
+        }
+        let hit = false
+        for (let j = 0; j < fighters.length; j += 1) {
+          const f = fighters[j]
+          if (f.eliminated) continue
+          // Arg Leon: träffa ägaren. Annars: alla utom ägaren (boss-läge: boss)
+          if (b.angry) {
+            if (f !== b.owner) continue
+          } else if (bossMode) {
+            if (!f.isBoss) continue
+          } else if (f === b.owner || f.isBoss) {
+            continue
+          }
+          const prox = getRadius(f) + b.r + PROJECTILE_HIT_PAD * 0.5
+          const dNow = Math.hypot(f.x - b.x, f.y - b.y)
+          const dSweep = distPointToSegment(f.x, f.y, prevX, prevY, b.x, b.y)
+          if (dNow < prox || dSweep < prox) {
+            if (!isShielded(f)) {
+              f.lives -= b.damage
+              if (f.isBoss) addBossDamage(b.owner, b.damage)
+            }
+            f.squash = 0.75
+            f.vx += b.vx * 0.35
+            f.vy += b.vy * 0.35
+            spawnBurst(b.x, b.y, 2.4)
+            shake = Math.min(22, shake + 12)
+            flash = Math.min(0.7, flash + 0.35)
+            triggerCheer()
+            hit = true
+            break
+          }
+        }
+        if (hit) footballs.splice(i, 1)
+      }
+    }
+
+    function drawLeon(L) {
+      const r = L.r
+      ctx.save()
+      ctx.translate(L.x, L.y)
+      ctx.scale(L.face || 1, 1)
+      // Hud
+      const skin = ctx.createRadialGradient(-r * 0.2, -r * 0.25, r * 0.1, 0, 0, r)
+      skin.addColorStop(0, '#f5d0a9')
+      skin.addColorStop(0.65, '#d4a574')
+      skin.addColorStop(1, '#a67c52')
+      ctx.fillStyle = skin
+      ctx.beginPath()
+      ctx.arc(0, 0, r, 0, Math.PI * 2)
+      ctx.fill()
+      // Messi-tröja (blå/vit Argentina-ish)
+      ctx.fillStyle = L.angry ? '#7f1d1d' : '#74acdf'
+      ctx.beginPath()
+      ctx.ellipse(0, r * 0.22, r * 0.78, r * 0.58, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(-r * 0.72, r * 0.02, r * 1.44, r * 0.14)
+      ctx.fillStyle = L.angry ? '#fca5a5' : '#0f172a'
+      ctx.font = `bold ${Math.max(9, Math.floor(r * 0.32))}px Figtree, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('Messi', 0, r * 0.28)
+      // Hår
+      ctx.fillStyle = '#1c1917'
+      ctx.beginPath()
+      ctx.ellipse(0, -r * 0.55, r * 0.62, r * 0.32, 0, Math.PI, Math.PI * 2)
+      ctx.fill()
+      // Ögon
+      ctx.fillStyle = '#111'
+      ctx.beginPath()
+      ctx.arc(-r * 0.22, -r * 0.1, r * 0.09, 0, Math.PI * 2)
+      ctx.arc(r * 0.22, -r * 0.1, r * 0.09, 0, Math.PI * 2)
+      ctx.fill()
+      // Fotboll i hand/fot när han springer
+      if (L.phase === 'run') {
+        ctx.save()
+        ctx.translate(r * 0.75, r * 0.55)
+        ctx.rotate(L.spin || 0)
+        drawFootballIcon(LEON_BALL_RADIUS * 0.7)
+        ctx.restore()
+      }
+      ctx.restore()
+    }
+
+    function drawFootballIcon(r) {
+      ctx.fillStyle = '#f5f5f4'
+      ctx.beginPath()
+      ctx.arc(0, 0, r, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = '#1c1917'
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+      ctx.fillStyle = '#1c1917'
+      ctx.beginPath()
+      for (let i = 0; i < 5; i += 1) {
+        const a = (i / 5) * Math.PI * 2 - Math.PI / 2
+        const x = Math.cos(a) * r * 0.35
+        const y = Math.sin(a) * r * 0.35
+        if (i === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      }
+      ctx.closePath()
+      ctx.fill()
+      ctx.beginPath()
+      ctx.arc(0, 0, r * 0.55, 0, Math.PI * 2)
+      ctx.strokeStyle = '#44403c'
+      ctx.lineWidth = 1
+      ctx.stroke()
+    }
+
+    function drawFootball(b) {
+      ctx.save()
+      ctx.translate(b.x, b.y)
+      ctx.rotate(b.spin || 0)
+      drawFootballIcon(b.r)
+      ctx.restore()
     }
 
     function givePistol(fighter) {
@@ -1794,9 +2288,12 @@ function FightingBalls() {
       ctx.fillStyle = 'rgba(255,255,255,0.55)'
       ctx.font = '13px Figtree, sans-serif'
       ctx.textBaseline = 'top'
-      ctx.fillText('Skriv 112 för polis', width * 0.5, py + 112)
+      ctx.fillText('112 polis · 123 Leon', width * 0.5, py + 112)
       if (nokiaDialMessage && performance.now() < nokiaDialMessageUntil) {
-        ctx.fillStyle = nokiaDialMessage.startsWith('112') ? '#86efac' : '#fca5a5'
+        ctx.fillStyle =
+          nokiaDialMessage.startsWith('112') || nokiaDialMessage.startsWith('123')
+            ? '#86efac'
+            : '#fca5a5'
         ctx.font = '600 14px Figtree, sans-serif'
         ctx.fillText(nokiaDialMessage, width * 0.5, py + 134)
       }
@@ -1834,6 +2331,33 @@ function FightingBalls() {
     function updateArrows(dt) {
       for (let i = arrows.length - 1; i >= 0; i -= 1) {
         const a = arrows[i]
+        if (a.homing && a.owner && !a.owner.eliminated) {
+          let target = null
+          let best = Infinity
+          for (let j = 0; j < fighters.length; j += 1) {
+            const f = fighters[j]
+            if (f === a.owner || f.eliminated || f.isBoss) continue
+            const d = Math.hypot(f.x - a.x, f.y - a.y)
+            if (d < best) {
+              best = d
+              target = f
+            }
+          }
+          if (target) {
+            const desired = Math.atan2(target.y - a.y, target.x - a.x)
+            const speed = Math.hypot(a.vx, a.vy) || PISTOL_SPEED
+            let cur = Math.atan2(a.vy, a.vx)
+            let delta = desired - cur
+            while (delta > Math.PI) delta -= Math.PI * 2
+            while (delta < -Math.PI) delta += Math.PI * 2
+            cur += Math.max(-0.2, Math.min(0.2, delta)) * dt
+            a.vx = Math.cos(cur) * speed
+            a.vy = Math.sin(cur) * speed
+            a.angle = cur
+          }
+        }
+        const prevX = a.x
+        const prevY = a.y
         a.x += a.vx * dt
         a.y += a.vy * dt
         a.life -= dt * 0.02
@@ -1862,13 +2386,15 @@ function FightingBalls() {
           const f = fighters[j]
           if (f === a.owner || f.eliminated) continue
           if (bossMode && !f.isBoss) continue
-          const d = Math.hypot(f.x - a.x, f.y - a.y)
+          const fr = getRadius(f)
           const prox = a.nokia
-            ? NOKIA_PROXIMITY + getRadius(f)
+            ? NOKIA_PROXIMITY + fr + PROJECTILE_HIT_PAD * 0.35
             : a.rpg
-              ? RPG_PROXIMITY + getRadius(f)
-              : getRadius(f) + a.r
-          if (d < prox) {
+              ? RPG_PROXIMITY + fr + PROJECTILE_HIT_PAD * 0.35
+              : fr + a.r + PROJECTILE_HIT_PAD
+          const dNow = Math.hypot(f.x - a.x, f.y - a.y)
+          const dSweep = distPointToSegment(f.x, f.y, prevX, prevY, a.x, a.y)
+          if (dNow < prox || dSweep < prox) {
             if (a.nokia) {
               explodeNokia(a)
             } else if (a.rpg) {
@@ -2030,6 +2556,8 @@ function FightingBalls() {
     function updatePingBalls(dt) {
       for (let i = pingBalls.length - 1; i >= 0; i -= 1) {
         const b = pingBalls[i]
+        const prevX = b.x
+        const prevY = b.y
         b.x += b.vx * dt
         b.y += b.vy * dt
         b.spin += 0.4 * dt
@@ -2043,8 +2571,10 @@ function FightingBalls() {
           const f = fighters[j]
           if (f === b.owner || f.eliminated) continue
           if (bossMode && !f.isBoss) continue
-          const d = Math.hypot(f.x - b.x, f.y - b.y)
-          if (d < getRadius(f) + b.r) {
+          const prox = getRadius(f) + b.r + PROJECTILE_HIT_PAD
+          const dNow = Math.hypot(f.x - b.x, f.y - b.y)
+          const dSweep = distPointToSegment(f.x, f.y, prevX, prevY, b.x, b.y)
+          if (dNow < prox || dSweep < prox) {
             if (!isShielded(f)) {
               f.lives -= b.damage
               if (f.isBoss) addBossDamage(b.owner, b.damage)
@@ -2093,7 +2623,8 @@ function FightingBalls() {
         kind !== 'pistol' &&
         kind !== 'rpg' &&
         kind !== 'sniper' &&
-        kind !== 'ping'
+        kind !== 'ping' &&
+        kind !== 'hammer'
       ) {
         kind = 'limb'
       } else if (kind === 'ping') {
@@ -2111,69 +2642,108 @@ function FightingBalls() {
       } else if (kind === 'bow' || kind === 'nokia') {
         shootBow(attacker)
         return
+      } else if (kind === 'hammer') {
+        // fall through to melee swing
       }
       if (nerminPower) kind = 'limb'
       const now = performance.now()
       if (now < (attacker.knifeReadyAt || 0)) return
       const stats = meleeStats(kind, attacker)
-
-      const target = bossMode
-        ? fighters.find((f) => f.isBoss && !f.eliminated)
-        : fighters.find((f) => f !== attacker && !f.eliminated)
-
-      let angle = aimAtOpponent(attacker)
+      const angle = aimAtOpponent(attacker)
 
       attacker.knifeReadyAt = now + stats.cooldown
       attacker.knifeSwingUntil = now + stats.swingMs
       attacker.knifeEquipped = true
       attacker.meleeKind = kind
       attacker.knifeAngle = angle
+      attacker.meleeDidHit = false
       attacker.squash = 0.45
       attacker.face = Math.cos(angle) >= 0 ? 1 : -1
 
       // Spark / returnera pingisboll i luften
       const returned = tryReturnPingBall(attacker, kind)
+      if (!returned) {
+        spawnBurst(
+          attacker.x + Math.cos(angle) * ballR * 1.15,
+          attacker.y + Math.sin(angle) * ballR * 1.15,
+          0.55,
+        )
+      }
+      updateMeleeHit(attacker, now)
+    }
 
-      if (!target) {
-        if (!returned) {
-          spawnBurst(
-            attacker.x + Math.cos(angle) * ballR,
-            attacker.y + Math.sin(angle) * ballR,
-            0.5,
-          )
-        }
+    function updateMeleeHit(attacker, now = performance.now()) {
+      if (!attacker || attacker.eliminated || attacker.meleeDidHit) return
+      const kind = attacker.meleeKind || 'knife'
+      if (
+        kind !== 'knife' &&
+        kind !== 'sword' &&
+        kind !== 'hammer' &&
+        kind !== 'foot' &&
+        kind !== 'limb'
+      ) {
         return
       }
-
-      const dist = Math.hypot(target.x - attacker.x, target.y - attacker.y)
-      const reach = getRadius(attacker) + getRadius(target) + stats.reach
-      if (dist > reach) {
-        if (!returned) {
-          spawnBurst(
-            attacker.x + Math.cos(angle) * ballR * 1.2,
-            attacker.y + Math.sin(angle) * ballR * 1.2,
-            0.55,
-          )
+      const stats = meleeStats(kind, attacker)
+      const candidates = fighters.filter(
+        (f) => f !== attacker && !f.eliminated && (bossMode ? f.isBoss : !f.isBoss),
+      )
+      let angle =
+        typeof attacker.knifeAngle === 'number'
+          ? attacker.knifeAngle
+          : (attacker.face || 1) > 0
+            ? 0
+            : Math.PI
+      let best = null
+      let bestDist = Infinity
+      for (let i = 0; i < candidates.length; i += 1) {
+        const t = candidates[i]
+        const d = Math.hypot(t.x - attacker.x, t.y - attacker.y)
+        if (d < bestDist) {
+          bestDist = d
+          best = t
         }
-        return
       }
+      if (best) {
+        const aim = Math.atan2(best.y - attacker.y, best.x - attacker.x)
+        let delta = aim - angle
+        while (delta > Math.PI) delta -= Math.PI * 2
+        while (delta < -Math.PI) delta += Math.PI * 2
+        angle += Math.max(-0.45, Math.min(0.45, delta))
+        attacker.knifeAngle = angle
+      }
+      const ar = getRadius(attacker)
+      for (let i = 0; i < candidates.length; i += 1) {
+        const target = candidates[i]
+        const tr = getRadius(target)
+        const dx = target.x - attacker.x
+        const dy = target.y - attacker.y
+        const dist = Math.hypot(dx, dy)
+        const reach = ar + tr + stats.reach + MELEE_HIT_PAD
+        if (dist > reach) continue
+        const aim = Math.atan2(dy, dx)
+        let delta = aim - angle
+        while (delta > Math.PI) delta -= Math.PI * 2
+        while (delta < -Math.PI) delta += Math.PI * 2
+        if (Math.abs(delta) > MELEE_ARC) continue
 
-      if (target.isBoss) {
-        target.lives -= stats.damage
-        addBossDamage(attacker, stats.damage)
-      } else {
-        if (!isShielded(target, now)) {
+        if (target.isBoss) {
+          target.lives -= stats.damage
+          addBossDamage(attacker, stats.damage)
+        } else if (!isShielded(target, now)) {
           target.lives -= stats.damage
         }
+        const kick = kind === 'foot'
+        target.squash = kick ? 0.55 : 0.7
+        target.vx += Math.cos(angle) * (kick ? 14 : 10)
+        target.vy += Math.sin(angle) * (kick ? 14 : 10)
+        spawnBurst(target.x, target.y, kick ? 1.8 : 2.2)
+        shake = Math.min(20, shake + (kick ? 8 : 10))
+        flash = Math.min(0.55, flash + (kick ? 0.18 : 0.25))
+        triggerCheer()
+        attacker.meleeDidHit = true
+        return
       }
-      const kick = kind === 'foot'
-      target.squash = kick ? 0.55 : 0.7
-      target.vx += Math.cos(angle) * (kick ? 14 : 10)
-      target.vy += Math.sin(angle) * (kick ? 14 : 10)
-      spawnBurst(target.x, target.y, kick ? 1.8 : 2.2)
-      shake = Math.min(20, shake + (kick ? 8 : 10))
-      flash = Math.min(0.55, flash + (kick ? 0.18 : 0.25))
-      triggerCheer()
     }
 
     function swingKnife(attacker) {
@@ -2241,9 +2811,7 @@ function FightingBalls() {
       if (canHurt && vsBoss) {
         const boss = a.isBoss ? a : b
         const hero = a.isBoss ? b : a
-        if (!isShielded(hero, now)) {
-          hero.lives -= BOSS_DAMAGE
-        }
+        // Boss gör ingen touch-skada — bara spelaren skadar bossen
         const touchDmg =
           hero.control === 'wasd' || hero.player
             ? PLAYER_HIT_DAMAGE
@@ -2335,6 +2903,7 @@ function FightingBalls() {
       ball.knifeEquipped = false
       ball.knifeReadyAt = 0
       ball.knifeSwingUntil = 0
+      ball.meleeDidHit = false
       ball.spearEquipped = false
       ball.spearReadyAt = 0
       ball.spearSwingUntil = 0
@@ -2376,6 +2945,24 @@ function FightingBalls() {
       spawnBurst(ball.x, ball.y, 1.2)
     }
 
+    function grantBossSniper(side) {
+      if (side === 'red') {
+        inventory.pistolUnlockedRed = true
+        inventory.pistolRed = true
+        inventory.pistolLevelRed = Math.max(inventory.pistolLevelRed, PISTOL_SNIPER_LEVEL)
+        inventory.sniperRed = true
+        inventory.rpgRed = true
+        inventory.weaponRed = 'sniper'
+      } else {
+        inventory.pistolUnlockedBlue = true
+        inventory.pistolBlue = true
+        inventory.pistolLevelBlue = Math.max(inventory.pistolLevelBlue, PISTOL_SNIPER_LEVEL)
+        inventory.sniperBlue = true
+        inventory.rpgBlue = true
+        inventory.weaponBlue = 'sniper'
+      }
+    }
+
     function endBossFight(playerWon) {
       if (playerWon) {
         // Den som tar sista slaget får belöningen
@@ -2388,6 +2975,11 @@ function FightingBalls() {
         } else {
           blueCoins += BOSS_KILL_REWARD
         }
+        // Båda får sniper (50 dmg · 6s)
+        grantBossSniper('red')
+        grantBossSniper('blue')
+        killstreakMessage = `Boss besegrad! Sniper ${SNIPER_DAMAGE} dmg · ${SNIPER_COOLDOWN / 1000}s`
+        killstreakMessageUntil = performance.now() + 3500
       }
       spawnBurst(cx, cy, playerWon ? 3 : 1.5)
       shake = Math.min(22, shake + 12)
@@ -2405,6 +2997,10 @@ function FightingBalls() {
       bodyguards.length = 0
       farts.length = 0
       policeUnits.length = 0
+      leonUnits.length = 0
+      footballs.length = 0
+      poisonFlasks.length = 0
+      poisonPools.length = 0
       clearKeys()
       // Behåll poäng/guld — fortsätt mot 30
       resetFighters()
@@ -2423,6 +3019,10 @@ function FightingBalls() {
       bodyguards.length = 0
       farts.length = 0
       policeUnits.length = 0
+      leonUnits.length = 0
+      footballs.length = 0
+      poisonFlasks.length = 0
+      poisonPools.length = 0
       fighters.length = 0
       clearKeys()
 
@@ -2455,12 +3055,13 @@ function FightingBalls() {
       boss.player = false
       boss.maxLives = BOSS_HP
       boss.lives = BOSS_HP
-      boss.color = '#3b0a5c'
-      boss.glow = '#ff2d6a'
+      boss.color = BOSS_COLOR
+      boss.glow = BOSS_GLOW
       boss.anger = 1
       boss.bombUses = 0
       boss.shieldUses = 0
       boss.eliminated = false
+      boss.flaskReadyAt = performance.now() + 800
 
       fighters.push(red, blue, boss)
       keepInArena(red)
@@ -2521,18 +3122,24 @@ function FightingBalls() {
         }
 
         const reward = rollKillCoins()
+        const respawnDelay = eventPistolActive ? 0 : RESPAWN_COUNTDOWN_MS
         if (!ball.player && ball.control === 'arrows') {
-          // Blå dog → röd får snurr, blå tappar streak
+          // Blå dog → röd får snurr, blå tappar streak (odds tillbaka till dåliga)
           redCoins += reward
           redScore += 1
           ball.lives = 0
           ball.vx = 0
           ball.vy = 0
           ball.eliminated = true
-          ball.respawnAt = now + RESPAWN_COUNTDOWN_MS
+          ball.respawnAt = now + respawnDelay
           ball.control = null
+          const lost = inventory.killstreakKillsBlue
+          resetKillstreak('blue', { announce: false })
           addKillstreakKill('red')
-          resetKillstreak('blue')
+          if (lost > 0) {
+            killstreakMessage = `Blå dog · ×${lost} streak borta! · Röd snurr +1`
+            killstreakMessageUntil = now + 2800
+          }
           handleScoreMilestone('red', redScore, now)
           continue
         } else if (ball.player) {
@@ -2543,10 +3150,15 @@ function FightingBalls() {
           ball.vx = 0
           ball.vy = 0
           ball.eliminated = true
-          ball.respawnAt = now + RESPAWN_COUNTDOWN_MS
+          ball.respawnAt = now + respawnDelay
           ball.control = null
+          const lost = inventory.killstreakKillsRed
+          resetKillstreak('red', { announce: false })
           addKillstreakKill('blue')
-          resetKillstreak('red')
+          if (lost > 0) {
+            killstreakMessage = `Röd dog · ×${lost} streak borta! · Blå snurr +1`
+            killstreakMessageUntil = now + 2800
+          }
           handleScoreMilestone('blue', blueScore, now)
           continue
         }
@@ -2555,7 +3167,7 @@ function FightingBalls() {
         ball.vx = 0
         ball.vy = 0
         ball.eliminated = true
-        ball.respawnAt = now + RESPAWN_COUNTDOWN_MS
+        ball.respawnAt = now + respawnDelay
         ball.control = null
       }
     }
@@ -2610,6 +3222,7 @@ function FightingBalls() {
         if (f.coolUntil > 0) f.coolUntil += ms
         if (f.knifeReadyAt > 0) f.knifeReadyAt += ms
         if (f.knifeSwingUntil > 0) f.knifeSwingUntil += ms
+        if (f.flaskReadyAt > 0) f.flaskReadyAt += ms
       }
       for (let i = 0; i < bombs.length; i += 1) {
         if (bombs[i].fuseUntil > 0) bombs[i].fuseUntil += ms
@@ -2631,6 +3244,10 @@ function FightingBalls() {
       for (let i = 0; i < policeUnits.length; i += 1) {
         if (policeUnits[i].kidnapUntil > 0) policeUnits[i].kidnapUntil += ms
       }
+      for (let i = 0; i < poisonPools.length; i += 1) {
+        if (poisonPools[i].expiresAt > 0) poisonPools[i].expiresAt += ms
+        if (poisonPools[i].nextTick > 0) poisonPools[i].nextTick += ms
+      }
       if (winnerUntil > 0) winnerUntil += ms
       if (moggerUntil > 0) moggerUntil += ms
       if (moggerNextTick > 0) moggerNextTick += ms
@@ -2647,6 +3264,37 @@ function FightingBalls() {
 
     function handleScoreMilestone(side, score, now) {
       if (bossMode) return
+
+      // Poäng 5: alla får homing-pistol (ingen CD, 2 dmg)
+      if (score >= EVENT_PISTOL_AT && !eventPistolGranted) {
+        eventPistolGranted = true
+        eventPistolActive = true
+        killstreakMessage = `Poäng ${EVENT_PISTOL_AT}! Alla får pistol · 2 dmg · följer · ingen CD`
+        killstreakMessageUntil = now + 3200
+      }
+
+      // Poäng 10: förlora event-pistol + belöningshjul
+      if (score >= EVENT_PISTOL_END && eventPistolActive) {
+        eventPistolActive = false
+        killstreakMessage = `Poäng ${EVENT_PISTOL_END}! Event-pistolen borta`
+        killstreakMessageUntil = now + 2500
+      }
+      if (score >= SCORE_WHEEL_AT) {
+        if (side === 'red' && !inventory.scoreWheelDoneRed) {
+          inventory.scoreWheelDoneRed = true
+          if (isShopMilestone(score)) pendingScoreWheel = 'red'
+          else openScoreWheel('red')
+        } else if (side === 'blue' && !inventory.scoreWheelDoneBlue) {
+          inventory.scoreWheelDoneBlue = true
+          if (isShopMilestone(score)) pendingScoreWheel = 'blue'
+          else openScoreWheel('blue')
+        }
+      }
+
+      // Poäng 14: förlora hjul-belöning
+      if (score >= SCORE_REWARD_LOSE_AT) {
+        clearScoreReward(side)
+      }
 
       const atShop = isShopMilestone(score)
       const atBoss = score >= BOSS_SCORE && !bossTriggeredThisMatch
@@ -2680,13 +3328,336 @@ function FightingBalls() {
       }
     }
 
-    function resetKillstreak(side) {
+    function clearScoreReward(side) {
+      const prev = side === 'red' ? inventory.scoreRewardRed : inventory.scoreRewardBlue
+      if (!prev) return
+      if (side === 'red') inventory.scoreRewardRed = null
+      else inventory.scoreRewardBlue = null
+      if (prev === 'hammer') {
+        const w = side === 'red' ? inventory.weaponRed : inventory.weaponBlue
+        if (w === 'hammer') {
+          if (side === 'red') inventory.weaponRed = inventory.startWeaponRed || 'bow'
+          else inventory.weaponBlue = inventory.startWeaponBlue || 'bow'
+        }
+      }
+      killstreakMessage = `${side === 'red' ? 'Röd' : 'Blå'} förlorade ${prev} (poäng ${SCORE_REWARD_LOSE_AT})`
+      killstreakMessageUntil = performance.now() + 2800
+    }
+
+    function openScoreWheel(side) {
+      if (scoreWheelOpen || swSpinning || killstreakOpen) return
+      if (!shopOpen && !shopPausedAt) {
+        clearKeys()
+        shopPausedAt = performance.now()
+      }
+      scoreWheelSide = side
+      scoreWheelOpen = true
+      swPending = null
+      swResultLabel = ''
+      swNeedSpin = true
+    }
+
+    function closeScoreWheel() {
+      if (swSpinning) return
+      scoreWheelOpen = false
+      scoreWheelSide = null
+      swPending = null
+      swNeedSpin = false
+      if (shopPausedAt > 0 && !shopOpen && !killstreakOpen) {
+        shiftPausedTimers(performance.now() - shopPausedAt)
+        shopPausedAt = 0
+      }
+    }
+
+    function startScoreWheelSpin() {
+      if (!scoreWheelOpen || !scoreWheelSide || swSpinning) return
+      const n = SCORE_WHEEL_SEGMENTS.length
+      const idx = Math.floor(Math.random() * n)
+      const prize = SCORE_WHEEL_SEGMENTS[idx]
+      const slice = (Math.PI * 2) / n
+      const segmentCenter = idx * slice + slice * 0.5
+      const extraTurns = 5 + Math.floor(Math.random() * 3)
+      const current = ((swAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)
+      const desired = ((-Math.PI / 2 - segmentCenter) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2)
+      let delta = desired - current
+      if (delta < 0) delta += Math.PI * 2
+      swFromAngle = swAngle
+      swToAngle = swAngle + extraTurns * Math.PI * 2 + delta
+      swPending = prize
+      swSpinning = true
+      swSpinStart = performance.now()
+      swResultLabel = ''
+    }
+
+    function applyScoreWheelPrize(side, prize) {
+      if (!prize) return
+      if (prize.id === 'nuke' || prize.id === 'hammer') {
+        if (side === 'red') inventory.scoreRewardRed = prize.id
+        else inventory.scoreRewardBlue = prize.id
+        if (prize.id === 'hammer') {
+          if (side === 'red') inventory.weaponRed = 'hammer'
+          else inventory.weaponBlue = 'hammer'
+        }
+      } else if (prize.id === 'coins25') {
+        if (side === 'red') redCoins += 25
+        else blueCoins += 25
+      } else if (prize.id === 'lifeDrink') {
+        if (side === 'red') inventory.lifeDrinkRed += 1
+        else inventory.lifeDrinkBlue += 1
+      } else if (prize.id === 'sus') {
+        if (side === 'red') inventory.susRed += 1
+        else inventory.susBlue += 1
+      } else if (prize.id === 'mcShield') {
+        if (side === 'red') inventory.mcShieldRed += 1
+        else inventory.mcShieldBlue += 1
+      }
+    }
+
+    function updateScoreWheelSpin(now = performance.now()) {
+      if (!swSpinning) return
+      const t = Math.min(1, (now - swSpinStart) / swSpinDuration)
+      const ease = 1 - (1 - t) ** 3
+      swAngle = swFromAngle + (swToAngle - swFromAngle) * ease
+      if (t < 1) return
+      swSpinning = false
+      swAngle = swToAngle
+      const prize = swPending
+      swPending = null
+      if (prize && scoreWheelSide) {
+        applyScoreWheelPrize(scoreWheelSide, prize)
+        swResultLabel = prize.label
+        swResultUntil = now + 2500
+        killstreakMessage = `${scoreWheelSide === 'red' ? 'Röd' : 'Blå'} fick ${prize.label}!`
+        killstreakMessageUntil = now + 2800
+        spawnBurst(cx, cy, prize.id === 'nuke' ? 2.2 : 1.2)
+      }
+    }
+
+    function drawScoreWheel() {
+      scoreWheelHits.length = 0
+      if (!scoreWheelOpen || !scoreWheelSide) return
+      if (swNeedSpin && !swSpinning) {
+        swNeedSpin = false
+        startScoreWheelSpin()
+      }
+      updateScoreWheelSpin()
+      const side = scoreWheelSide
+      const panelW = Math.min(440, width * 0.92)
+      const panelH = Math.min(500, height * 0.88)
+      const px = width * 0.5 - panelW * 0.5
+      const py = height * 0.5 - panelH * 0.5
+      ctx.save()
+      ctx.fillStyle = 'rgba(0,0,0,0.75)'
+      ctx.fillRect(0, 0, width, height)
+      ctx.fillStyle = '#1a1520'
+      ctx.strokeStyle = side === 'red' ? '#ff6b5a' : '#5ec8ff'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(px, py, panelW, panelH, 16)
+      else ctx.rect(px, py, panelW, panelH)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = '#ffe9a0'
+      ctx.font = 'bold 26px Syne, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.fillText(`POÄNG ${SCORE_WHEEL_AT}-HJUL`, width * 0.5, py + 14)
+      ctx.font = '14px Figtree, sans-serif'
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'
+      ctx.fillText(
+        `${side === 'red' ? 'Röd' : 'Blå'} · belöning till poäng ${SCORE_REWARD_LOSE_AT}`,
+        width * 0.5,
+        py + 46,
+      )
+      const cxW = width * 0.5
+      const cyW = py + panelH * 0.48
+      const radius = Math.min(panelW, panelH) * 0.28
+      const n = SCORE_WHEEL_SEGMENTS.length
+      const slice = (Math.PI * 2) / n
+      ctx.save()
+      ctx.translate(cxW, cyW)
+      ctx.rotate(swAngle)
+      for (let i = 0; i < n; i += 1) {
+        const seg = SCORE_WHEEL_SEGMENTS[i]
+        const a0 = i * slice
+        const a1 = a0 + slice
+        ctx.beginPath()
+        ctx.moveTo(0, 0)
+        ctx.arc(0, 0, radius, a0, a1)
+        ctx.closePath()
+        ctx.fillStyle = seg.color
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+        ctx.lineWidth = 2
+        ctx.stroke()
+        const mid = a0 + slice * 0.5
+        ctx.save()
+        ctx.rotate(mid)
+        ctx.fillStyle = '#fff'
+        ctx.font = `bold ${Math.max(11, Math.floor(radius * 0.1))}px Figtree, sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(seg.label, radius * 0.62, 0)
+        ctx.restore()
+      }
+      ctx.beginPath()
+      ctx.arc(0, 0, radius * 0.16, 0, Math.PI * 2)
+      ctx.fillStyle = '#0f0b14'
+      ctx.fill()
+      ctx.restore()
+      ctx.fillStyle = '#ffe9a0'
+      ctx.beginPath()
+      ctx.moveTo(cxW, cyW - radius - 4)
+      ctx.lineTo(cxW - 12, cyW - radius - 28)
+      ctx.lineTo(cxW + 12, cyW - radius - 28)
+      ctx.closePath()
+      ctx.fill()
+      if (swResultLabel && performance.now() < swResultUntil) {
+        ctx.fillStyle = '#f0c040'
+        ctx.font = 'bold 22px Syne, sans-serif'
+        ctx.fillText(`Du fick: ${swResultLabel}`, width * 0.5, cyW + radius + 28)
+      }
+      const btnW = 130
+      const btnH = 40
+      const btnY = py + panelH - 56
+      const closeX = width * 0.5 - btnW * 0.5
+      if (!swSpinning) {
+        ctx.fillStyle = '#2a2433'
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(closeX, btnY, btnW, btnH, 10)
+        else ctx.rect(closeX, btnY, btnW, btnH)
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = '#fff'
+        ctx.font = 'bold 16px Figtree, sans-serif'
+        ctx.textBaseline = 'middle'
+        ctx.fillText('OK', closeX + btnW * 0.5, btnY + btnH * 0.5)
+        scoreWheelHits.push({ x: closeX, y: btnY, w: btnW, h: btnH, id: 'close' })
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.55)'
+        ctx.font = '15px Figtree, sans-serif'
+        ctx.fillText('Snurrar…', width * 0.5, btnY + 20)
+      }
+      ctx.restore()
+    }
+
+    function useNuke(side) {
+      const reward = side === 'red' ? inventory.scoreRewardRed : inventory.scoreRewardBlue
+      const used = side === 'red' ? inventory.nukeUsedRed : inventory.nukeUsedBlue
+      if (reward !== 'nuke' || used) return false
+      const owner =
+        side === 'red'
+          ? fighters.find((f) => (f.player || f.control === 'wasd') && !f.eliminated)
+          : fighters.find((f) => f.control === 'arrows' && !f.eliminated)
+      if (!owner) return false
+      if (side === 'red') inventory.nukeUsedRed = true
+      else inventory.nukeUsedBlue = true
+      if (side === 'red') inventory.scoreRewardRed = null
+      else inventory.scoreRewardBlue = null
+      flash = 1
+      shake = 22
+      spawnBurst(cx, cy, 4)
+      for (let i = 0; i < fighters.length; i += 1) {
+        const f = fighters[i]
+        if (f === owner || f.eliminated) continue
+        f.lives = 0
+      }
+      killstreakMessage = `${side === 'red' ? 'Röd' : 'Blå'} NUKE!`
+      killstreakMessageUntil = performance.now() + 3000
+      return true
+    }
+
+    function placeWall(fighter) {
+      if (!fighter || fighter.eliminated) return false
+      const side = isRedSide(fighter) ? 'red' : 'blue'
+      const reward = side === 'red' ? inventory.scoreRewardRed : inventory.scoreRewardBlue
+      if (reward !== 'hammer') return false
+      const ang =
+        typeof fighter.knifeAngle === 'number'
+          ? fighter.knifeAngle
+          : (fighter.face || 1) > 0
+            ? 0
+            : Math.PI
+      const dist = getRadius(fighter) + WALL_LEN * 0.55
+      const mx = fighter.x + Math.cos(ang) * dist
+      const my = fighter.y + Math.sin(ang) * dist
+      walls.push({
+        x: mx,
+        y: my,
+        ang,
+        w: WALL_LEN,
+        h: WALL_THICK,
+        owner: side,
+      })
+      spawnBurst(mx, my, 0.6)
+      return true
+    }
+
+    function resolveWallCollisions(ball) {
+      if (!ball || ball.eliminated || walls.length === 0) return
+      const r = getRadius(ball)
+      for (let i = 0; i < walls.length; i += 1) {
+        const w = walls[i]
+        const cos = Math.cos(-w.ang)
+        const sin = Math.sin(-w.ang)
+        const dx = ball.x - w.x
+        const dy = ball.y - w.y
+        const lx = dx * cos - dy * sin
+        const ly = dx * sin + dy * cos
+        const hx = w.w * 0.5 + r
+        const hy = w.h * 0.5 + r
+        if (Math.abs(lx) > hx || Math.abs(ly) > hy) continue
+        const ox = hx - Math.abs(lx)
+        const oy = hy - Math.abs(ly)
+        let nlx = lx
+        let nly = ly
+        if (ox < oy) nlx = lx > 0 ? hx : -hx
+        else nly = ly > 0 ? hy : -hy
+        const wx = nlx * Math.cos(w.ang) - nly * Math.sin(w.ang)
+        const wy = nlx * Math.sin(w.ang) + nly * Math.cos(w.ang)
+        ball.x = w.x + wx
+        ball.y = w.y + wy
+        ball.vx *= 0.4
+        ball.vy *= 0.4
+      }
+    }
+
+    function drawWalls() {
+      for (let i = 0; i < walls.length; i += 1) {
+        const w = walls[i]
+        ctx.save()
+        ctx.translate(w.x, w.y)
+        ctx.rotate(w.ang)
+        ctx.fillStyle = '#92400e'
+        ctx.strokeStyle = '#fbbf24'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(-w.w * 0.5, -w.h * 0.5, w.w, w.h, 4)
+        } else {
+          ctx.rect(-w.w * 0.5, -w.h * 0.5, w.w, w.h)
+        }
+        ctx.fill()
+        ctx.stroke()
+        ctx.restore()
+      }
+    }
+
+    function resetKillstreak(side, opts = {}) {
+      const prev =
+        side === 'red' ? inventory.killstreakKillsRed : inventory.killstreakKillsBlue
       if (side === 'red') {
         inventory.killstreakKillsRed = 0
         inventory.killstreakSpinsRed = 0
       } else {
         inventory.killstreakKillsBlue = 0
         inventory.killstreakSpinsBlue = 0
+      }
+      if (prev > 0 && opts.announce !== false) {
+        killstreakMessage = `${side === 'red' ? 'Röd' : 'Blå'} dog · killstreak borta!`
+        killstreakMessageUntil = performance.now() + 2500
       }
       if (killstreakOpen && killstreakSide === side && !ksSpinning) {
         closeKillstreak()
@@ -2707,16 +3678,23 @@ function FightingBalls() {
     }
 
     function killstreakWeight(seg, kills) {
-      const k = Math.max(1, kills)
-      if (seg.rarity === 'common') return Math.max(6, 28 - k * 2.2)
-      if (seg.rarity === 'good') return 7 + k * 0.9
-      if (seg.rarity === 'better') return 1.5 + k * 1.4
-      // jackpot 100 SUS: ~1.5% vid 1 kill → mycket högre med fler
-      return 0.4 + k * k * 0.35
+      const k = Math.max(0, kills)
+      // Efter död / låg streak: nästan bara mid/commons. Hög streak → bra grejer.
+      if (k <= 1) {
+        if (seg.rarity === 'common') return 42
+        if (seg.rarity === 'good') return 4
+        if (seg.rarity === 'better') return 0.35
+        return 0.12 // jackpot ~0.1%
+      }
+      if (seg.rarity === 'common') return Math.max(3, 36 - k * 5.5)
+      if (seg.rarity === 'good') return 4 + k * 1.5
+      if (seg.rarity === 'better') return 0.4 + k * k * 0.4
+      // jackpot: k=2 ≈1%, k=5 ≈10%+, k=8 ≈20%+
+      return 0.15 + k * k * 0.5
     }
 
     function jackpotChancePct(kills) {
-      const k = Math.max(1, kills)
+      const k = Math.max(0, kills)
       let total = 0
       let jack = 0
       for (let i = 0; i < KILLSTREAK_SEGMENTS.length; i += 1) {
@@ -3036,6 +4014,12 @@ function FightingBalls() {
         winnerUntil = performance.now() + 3000
         return
       }
+      if (pendingScoreWheel) {
+        const side = pendingScoreWheel
+        pendingScoreWheel = null
+        openScoreWheel(side)
+        return
+      }
       if (startBoss && !bossMode && !winner) {
         startBossFight()
       }
@@ -3207,7 +4191,7 @@ function FightingBalls() {
             id: `${side}-sword`,
             weapon: 'sword',
             label: 'Svärd',
-            sub: 'Slår i närstrid · 2 dmg',
+            sub: 'Slår i närstrid · 3 dmg',
             by: swordY,
           },
         ]
@@ -3299,6 +4283,41 @@ function FightingBalls() {
 
     function submitCode() {
       const typed = codesInput.trim().toLowerCase()
+      if (typed === MJOLK_CODE) {
+        codesLockedExceptBoss = true
+        otisPower = false
+        nerminPower = false
+        codesMessage = 'Mjölk! Alla koder borta · bara grön boss kvar'
+        codesMessageUntil = performance.now() + 3500
+        codesInput = ''
+        spawnBurst(cx, cy, 1.8)
+        triggerCheer()
+        return
+      }
+      if (typed === GRON_BOSS_CODE) {
+        if (bossMode) {
+          codesMessage = 'Boss redan igång'
+          codesMessageUntil = performance.now() + 2000
+          codesInput = ''
+          return
+        }
+        closeCodes()
+        bossTriggeredThisMatch = true
+        startBossFight()
+        codesMessage = 'Grön boss!'
+        codesMessageUntil = performance.now() + 3000
+        spawnBurst(cx, cy, 2.5)
+        triggerCheer()
+        flash = Math.min(0.8, flash + 0.5)
+        shake = Math.min(18, shake + 10)
+        return
+      }
+      if (codesLockedExceptBoss) {
+        codesMessage = 'Koden är avstängd (mjölk)'
+        codesMessageUntil = performance.now() + 2000
+        codesInput = ''
+        return
+      }
       if (typed === SECRET_CODE) {
         if (codeUsesLeft <= 0) {
           codesMessage = 'Koden är slut (0 kvar)'
@@ -3539,7 +4558,7 @@ function FightingBalls() {
         items.push({
           id: 'nokiaRed',
           title: inventory.nokiaRed ? 'Nokia (utrustad)' : 'Nokia-pilbåge',
-          desc: `R · Q · ${NOKIA_HIT_DAMAGE} + bränn · ring 112`,
+          desc: `R · Q · ${NOKIA_HIT_DAMAGE} + bränn · 112/123`,
           cost: inventory.nokiaRed ? 0 : shopPrice(NOKIA_COST),
           side: 'Röd',
           owned: inventory.nokiaRed ? 1 : 0,
@@ -3563,7 +4582,7 @@ function FightingBalls() {
         items.push({
           id: 'nokiaBlue',
           title: inventory.nokiaBlue ? 'Nokia (utrustad)' : 'Nokia-pilbåge',
-          desc: `B · 1 · ${NOKIA_HIT_DAMAGE} + bränn · ring 112`,
+          desc: `B · 1 · ${NOKIA_HIT_DAMAGE} + bränn · 112/123`,
           cost: inventory.nokiaBlue ? 0 : shopPrice(NOKIA_COST),
           side: 'Blå',
           owned: inventory.nokiaBlue ? 1 : 0,
@@ -4187,7 +5206,7 @@ function FightingBalls() {
           if (f === g.owner || f.eliminated || f.lives <= 0) continue
           if (bossMode && !f.isBoss) continue
           // Skada om motståndaren är inne i den gröna radien
-          if (Math.hypot(f.x - g.x, f.y - g.y) > g.r + getRadius(f) * 0.25) continue
+          if (Math.hypot(f.x - g.x, f.y - g.y) > g.r + getRadius(f) + MELEE_HIT_PAD * 0.5) continue
           if (!isShielded(f, now)) {
             f.lives -= SUS_DAMAGE
             if (f.isBoss) addBossDamage(g.owner, SUS_DAMAGE)
@@ -4359,7 +5378,7 @@ function FightingBalls() {
 
       ctx.font = 'bold 16px Figtree, sans-serif'
       ctx.fillStyle = 'rgba(255,255,255,0.55)'
-      ctx.fillText(`först till ${WIN_SCORE} · shop 10/15/20… · boss ${BOSS_SCORE}`, width * 0.5, 28)
+      ctx.fillText(`först till ${WIN_SCORE} · shop 10/15/20… · grön boss ${BOSS_SCORE}`, width * 0.5, 28)
 
       if (killstreakMessage && performance.now() < killstreakMessageUntil) {
         ctx.font = 'bold 20px Figtree, sans-serif'
@@ -4449,16 +5468,37 @@ function FightingBalls() {
       inventory.lifeDrinkBlue = 0
       inventory.susRed = 0
       inventory.susBlue = 0
+      inventory.scoreRewardRed = null
+      inventory.scoreRewardBlue = null
+      inventory.scoreWheelDoneRed = false
+      inventory.scoreWheelDoneBlue = false
+      inventory.nukeUsedRed = false
+      inventory.nukeUsedBlue = false
       killstreakMessage = ''
       killstreakMessageUntil = 0
       killstreakOpen = false
       killstreakSide = null
       ksSpinning = false
       ksPendingPrize = null
+      scoreWheelOpen = false
+      scoreWheelSide = null
+      swSpinning = false
+      swPending = null
+      swNeedSpin = false
+      pendingScoreWheel = null
+      eventPistolActive = false
+      eventPistolGranted = false
+      walls.length = 0
       otisPower = false
       nerminPower = false
       farts.length = 0
       policeUnits.length = 0
+      leonUnits.length = 0
+      footballs.length = 0
+      leonCallsRed = 0
+      leonCallsBlue = 0
+      poisonFlasks.length = 0
+      poisonPools.length = 0
       closeNokiaDial()
       resetFighters()
       openWeaponSelect()
@@ -4479,31 +5519,41 @@ function FightingBalls() {
       ctx.strokeText(`×${redCoins}`, 48, 98)
       ctx.fillText(`×${redCoins}`, 48, 98)
 
-      const redW = inventory.weaponRed
-      const redLabel = nerminPower && redW !== 'rpg' && redW !== 'sniper' && redW !== 'bow' && redW !== 'nokia' && redW !== 'pistol'
-        ? 'Armar/ben · Q'
-        : redW === 'sniper'
-          ? 'Sniper · Q'
-          : redW === 'rpg'
-            ? 'RPG · Q'
-            : redW === 'pistol'
-              ? 'Pistol · Q'
-              : redW === 'bow'
-                ? 'Pilbåge · Q'
-                : redW === 'sword'
-                  ? 'Svärd · Q'
-                  : redW === 'nokia'
-                    ? 'Nokia · Q'
-                    : redW === 'knife'
-                      ? 'Kniv · Q'
-                      : redW === 'foot'
-                        ? 'Fot · Q'
-                        : ''
+      const redW = eventPistolActive ? 'pistol' : inventory.weaponRed
+      const redLabel = eventPistolActive
+        ? 'Event-pistol · Q'
+        : nerminPower && redW !== 'rpg' && redW !== 'sniper' && redW !== 'bow' && redW !== 'nokia' && redW !== 'pistol' && redW !== 'hammer'
+          ? 'Armar/ben · Q'
+          : redW === 'sniper'
+            ? 'Sniper · Q'
+            : redW === 'rpg'
+              ? 'RPG · Q'
+              : redW === 'pistol'
+                ? 'Pistol · Q'
+                : redW === 'bow'
+                  ? 'Pilbåge · Q'
+                  : redW === 'sword'
+                    ? 'Svärd · Q'
+                    : redW === 'nokia'
+                      ? 'Nokia · Q'
+                      : redW === 'knife'
+                        ? 'Kniv · Q'
+                        : redW === 'foot'
+                          ? 'Fot · Q'
+                          : redW === 'hammer'
+                            ? 'Hammare · Q · G väg'
+                            : ''
       if (redLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
         ctx.fillStyle = 'rgba(255,255,255,0.7)'
         ctx.strokeText(redLabel, 28, 122)
         ctx.fillText(redLabel, 28, 122)
+      }
+      if (inventory.scoreRewardRed === 'nuke' && !inventory.nukeUsedRed) {
+        ctx.font = '600 12px Figtree, sans-serif'
+        ctx.fillStyle = '#ef4444'
+        ctx.strokeText('NUKE · T', 28, 142)
+        ctx.fillText('NUKE · T', 28, 142)
       }
       ctx.restore()
 
@@ -4518,31 +5568,41 @@ function FightingBalls() {
       ctx.strokeText(`×${blueCoins}`, width - 48, 98)
       ctx.fillText(`×${blueCoins}`, width - 48, 98)
 
-      const blueW = inventory.weaponBlue
-      const blueLabel = nerminPower && blueW !== 'rpg' && blueW !== 'sniper' && blueW !== 'bow' && blueW !== 'nokia' && blueW !== 'pistol'
-        ? 'Armar/ben · 1'
-        : blueW === 'sniper'
-          ? 'Sniper · 1'
-          : blueW === 'rpg'
-            ? 'RPG · 1'
-            : blueW === 'pistol'
-              ? 'Pistol · 1'
-              : blueW === 'bow'
-                ? 'Pilbåge · 1'
-                : blueW === 'sword'
-                  ? 'Svärd · 1'
-                  : blueW === 'nokia'
-                    ? 'Nokia · 1'
-                    : blueW === 'knife'
-                      ? 'Kniv · 1'
-                      : blueW === 'ping'
-                        ? 'Pingis · 1'
-                        : ''
+      const blueW = eventPistolActive ? 'pistol' : inventory.weaponBlue
+      const blueLabel = eventPistolActive
+        ? 'Event-pistol · 1'
+        : nerminPower && blueW !== 'rpg' && blueW !== 'sniper' && blueW !== 'bow' && blueW !== 'nokia' && blueW !== 'pistol' && blueW !== 'hammer'
+          ? 'Armar/ben · 1'
+          : blueW === 'sniper'
+            ? 'Sniper · 1'
+            : blueW === 'rpg'
+              ? 'RPG · 1'
+              : blueW === 'pistol'
+                ? 'Pistol · 1'
+                : blueW === 'bow'
+                  ? 'Pilbåge · 1'
+                  : blueW === 'sword'
+                    ? 'Svärd · 1'
+                    : blueW === 'nokia'
+                      ? 'Nokia · 1'
+                      : blueW === 'knife'
+                        ? 'Kniv · 1'
+                        : blueW === 'ping'
+                          ? 'Pingis · 1'
+                          : blueW === 'hammer'
+                            ? 'Hammare · 1 · 8 väg'
+                            : ''
       if (blueLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
         ctx.fillStyle = 'rgba(255,255,255,0.7)'
         ctx.strokeText(blueLabel, width - 28, 122)
         ctx.fillText(blueLabel, width - 28, 122)
+      }
+      if (inventory.scoreRewardBlue === 'nuke' && !inventory.nukeUsedBlue) {
+        ctx.font = '600 12px Figtree, sans-serif'
+        ctx.fillStyle = '#ef4444'
+        ctx.strokeText('NUKE · 7', width - 28, 142)
+        ctx.fillText('NUKE · 7', width - 28, 142)
       }
       ctx.restore()
     }
@@ -4964,7 +6024,8 @@ function FightingBalls() {
             kind === 'sniper' ||
             kind === 'bow' ||
             kind === 'nokia' ||
-            kind === 'pistol') &&
+            kind === 'pistol' ||
+            kind === 'hammer') &&
           (kind === 'foot' ||
             kind === 'ping' ||
             kind === 'bow' ||
@@ -4973,6 +6034,7 @@ function FightingBalls() {
             kind === 'rpg' ||
             kind === 'sniper' ||
             kind === 'sword' ||
+            kind === 'hammer' ||
             (swinging && kind === 'knife'))
 
         if (showHeld && kind && kind !== 'limb') {
@@ -5003,9 +6065,11 @@ function FightingBalls() {
                       ? PISTOL_DRAW_MS
                       : kind === 'bow' || kind === 'nokia'
                         ? BOW_DRAW_MS
-                        : kind === 'sword'
-                          ? SWORD_SWING_MS
-                          : KNIFE_SWING_MS
+                        : kind === 'hammer'
+                          ? HAMMER_SWING_MS
+                          : kind === 'sword'
+                            ? SWORD_SWING_MS
+                            : KNIFE_SWING_MS
           const swingLeft = swinging ? Math.max(0, (ball.knifeSwingUntil || 0) - now) : swingMs
           const swingT = swinging ? 1 - swingLeft / swingMs : 0
           const rangedHold =
@@ -5033,13 +6097,27 @@ function FightingBalls() {
           ctx.save()
           ctx.rotate(dir)
 
-          if (kind === 'pistol') {
+          if (kind === 'hammer') {
+            ctx.translate(r * 0.55, 0)
+            ctx.fillStyle = '#5c4030'
+            ctx.fillRect(0, -r * 0.1, r * 1.15, r * 0.2)
+            ctx.fillStyle = '#a16207'
+            ctx.beginPath()
+            if (typeof ctx.roundRect === 'function') {
+              ctx.roundRect(r * 0.95, -r * 0.42, r * 0.7, r * 0.84, 4)
+            } else {
+              ctx.rect(r * 0.95, -r * 0.42, r * 0.7, r * 0.84)
+            }
+            ctx.fill()
+            ctx.fillStyle = '#fbbf24'
+            ctx.fillRect(r * 1.05, -r * 0.12, r * 0.45, r * 0.24)
+          } else if (kind === 'pistol') {
             // Lv0–3 samma look; Lv4+ längre silverpistol
-            const upgraded = gunLevel >= 4
+            const upgraded = gunLevel >= 4 || eventPistolActive
             const bodyLen = upgraded ? r * 1.2 : r * 0.95
             const bodyH = upgraded ? r * 0.26 : r * 0.24
             ctx.translate(r * 0.7, 0)
-            ctx.fillStyle = upgraded ? '#8a9399' : '#2a2a2a'
+            ctx.fillStyle = eventPistolActive ? '#f0c040' : upgraded ? '#8a9399' : '#2a2a2a'
             ctx.beginPath()
             if (typeof ctx.roundRect === 'function') {
               ctx.roundRect(0, -bodyH * 0.5, bodyLen, bodyH, 2)
@@ -5417,7 +6495,14 @@ function FightingBalls() {
           return
         }
 
-        if (shopOpen || codesOpen || weaponSelectOpen || nokiaDialOpen || killstreakOpen) {
+        if (
+          shopOpen ||
+          codesOpen ||
+          weaponSelectOpen ||
+          nokiaDialOpen ||
+          killstreakOpen ||
+          scoreWheelOpen
+        ) {
           last = now
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
           ctx.clearRect(0, 0, width, height)
@@ -5440,8 +6525,17 @@ function FightingBalls() {
           for (let i = 0; i < farts.length; i += 1) {
             drawFart(farts[i], shopPausedAt || now)
           }
+          drawPoisonPools(shopPausedAt || now)
+          drawPoisonFlasks()
+          drawWalls()
           for (let i = 0; i < policeUnits.length; i += 1) {
             drawPolice(policeUnits[i])
+          }
+          for (let i = 0; i < leonUnits.length; i += 1) {
+            drawLeon(leonUnits[i])
+          }
+          for (let i = 0; i < footballs.length; i += 1) {
+            drawFootball(footballs[i])
           }
           for (let i = 0; i < bodyguards.length; i += 1) {
             drawBodyguard(bodyguards[i])
@@ -5457,6 +6551,7 @@ function FightingBalls() {
           drawWeaponSelect()
           drawNokiaDial()
           drawKillstreakWheel()
+          drawScoreWheel()
           return
         }
 
@@ -5477,6 +6572,10 @@ function FightingBalls() {
         updateFarts(dt, now)
         updateBurns(dt, now)
         updatePolice(dt)
+        updateLeon(dt)
+        updateFootballs(dt)
+        updatePoisonFlasks(dt)
+        updatePoisonPools(dt, now)
         updateMogger(now)
         removeDeadFighters()
         updateSpectators(dt, now)
@@ -5504,6 +6603,9 @@ function FightingBalls() {
         for (let i = 0; i < farts.length; i += 1) {
           drawFart(farts[i], now)
         }
+        drawPoisonPools(now)
+        drawPoisonFlasks()
+        drawWalls()
 
         for (let i = shocks.length - 1; i >= 0; i -= 1) {
           const s = shocks[i]
@@ -5560,12 +6662,20 @@ function FightingBalls() {
           drawPolice(policeUnits[i])
         }
 
+        for (let i = 0; i < leonUnits.length; i += 1) {
+          drawLeon(leonUnits[i])
+        }
+
         for (let i = 0; i < bombs.length; i += 1) {
           drawBomb(bombs[i])
         }
 
         for (let i = 0; i < pingBalls.length; i += 1) {
           drawPingBall(pingBalls[i])
+        }
+
+        for (let i = 0; i < footballs.length; i += 1) {
+          drawFootball(footballs[i])
         }
 
         for (let i = 0; i < arrows.length; i += 1) {
@@ -5590,6 +6700,7 @@ function FightingBalls() {
         drawWeaponSelect()
         drawNokiaDial()
         drawKillstreakWheel()
+        drawScoreWheel()
 
         if (flash > 0.02) {
           ctx.fillStyle = `rgba(255,250,230,${flash * 0.35})`
@@ -5655,6 +6766,10 @@ function FightingBalls() {
     function onKeyDown(e) {
       const k = e.key.toLowerCase()
       if (k === 'escape') {
+        if (scoreWheelOpen) {
+          closeScoreWheel()
+          return
+        }
         if (killstreakOpen) {
           closeKillstreak()
           return
@@ -5677,7 +6792,12 @@ function FightingBalls() {
           }
           if (/^[0-9]$/.test(e.key) && nokiaDialInput.length < 6) {
             nokiaDialInput += e.key
-            if (nokiaDialInput === NOKIA_DIAL_CODE) submitNokiaDial()
+            if (
+              nokiaDialInput === NOKIA_DIAL_CODE ||
+              nokiaDialInput === LEON_DIAL_CODE
+            ) {
+              submitNokiaDial()
+            }
           }
         }
         return
@@ -5708,16 +6828,18 @@ function FightingBalls() {
           return
         }
         // Siffror + bokstäver (t.ex. ötis)
-        if (e.key.length === 1 && codesInput.length < 12) {
+        if (e.key.length === 1 && codesInput.length < 16) {
           const ch = e.key.toLowerCase()
-          if (/^[0-9a-zåäö]$/i.test(ch)) {
+          if (/^[0-9a-zåäö ]$/i.test(ch)) {
             codesInput += ch
             const typed = codesInput.toLowerCase()
             if (
               typed === SECRET_CODE ||
               typed === OTIS_CODE ||
               typed === NERMIN_CODE ||
-              typed === ALI_CODE
+              typed === ALI_CODE ||
+              typed === GRON_BOSS_CODE ||
+              typed === MJOLK_CODE
             ) {
               submitCode()
             }
@@ -5725,7 +6847,7 @@ function FightingBalls() {
         }
         return
       }
-      if (shopOpen) return
+      if (shopOpen || scoreWheelOpen || killstreakOpen) return
       if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
         keys[k] = true
         e.preventDefault()
@@ -5773,6 +6895,17 @@ function FightingBalls() {
         if (player) useMcShield(player, 'red')
         return
       }
+      if (k === 't' && !e.repeat) {
+        e.preventDefault()
+        useNuke('red')
+        return
+      }
+      if (k === 'g' && !e.repeat) {
+        e.preventDefault()
+        const player = fighters.find((f) => f.player)
+        if (player) placeWall(player)
+        return
+      }
       if (k === 'q' && !e.repeat) {
         e.preventDefault()
         const player = fighters.find((f) => f.player)
@@ -5803,6 +6936,17 @@ function FightingBalls() {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
         if (blue) useLifeDrink(blue, 'blue')
+        return
+      }
+      if ((k === '7' || e.code === 'Digit7' || e.code === 'Numpad7') && !e.repeat) {
+        e.preventDefault()
+        useNuke('blue')
+        return
+      }
+      if ((k === '8' || e.code === 'Digit8' || e.code === 'Numpad8') && !e.repeat) {
+        e.preventDefault()
+        const blue = fighters.find((f) => f.control === 'arrows')
+        if (blue) placeWall(blue)
         return
       }
       if ((k === '0' || e.code === 'Digit0' || e.code === 'Numpad0') && !e.repeat) {
@@ -5868,7 +7012,12 @@ function FightingBalls() {
           else if (hit.id === 'OK') submitNokiaDial()
           else if (/^[0-9]$/.test(hit.id) && nokiaDialInput.length < 6) {
             nokiaDialInput += hit.id
-            if (nokiaDialInput === NOKIA_DIAL_CODE) submitNokiaDial()
+            if (
+              nokiaDialInput === NOKIA_DIAL_CODE ||
+              nokiaDialInput === LEON_DIAL_CODE
+            ) {
+              submitNokiaDial()
+            }
           }
           return
         }
@@ -5891,6 +7040,16 @@ function FightingBalls() {
 
       if (codesOpen) {
         closeCodes()
+        return
+      }
+
+      if (scoreWheelOpen) {
+        for (let i = scoreWheelHits.length - 1; i >= 0; i -= 1) {
+          const hit = scoreWheelHits[i]
+          if (!hitRect(px, py, hit)) continue
+          if (hit.id === 'close') closeScoreWheel()
+          return
+        }
         return
       }
 
@@ -5942,6 +7101,9 @@ function FightingBalls() {
       let over = hitRect(px, py, shopButton) || hitRect(px, py, codesButton)
       if (inventory.nokiaRed && hitRect(px, py, nokiaDialButtonRed)) over = true
       if (inventory.nokiaBlue && hitRect(px, py, nokiaDialButtonBlue)) over = true
+      if (scoreWheelOpen) {
+        over = scoreWheelHits.some((h) => hitRect(px, py, h)) || true
+      }
       if (killstreakOpen) {
         over = killstreakHits.some((h) => hitRect(px, py, h)) || true
       }
