@@ -70,8 +70,10 @@ const LEON_MAX_SAFE_CALLS = 1 // 1:a gången mot fiende · 2:a+ mot dig
 const LEON_FOOTBALL_DAMAGE = 100
 const LEON_SPEED = 9
 const LEON_RADIUS = 28
-const LEON_BALL_SPEED = 14
+const LEON_BALL_SPEED = 18
 const LEON_BALL_RADIUS = 14
+const LEON_KICK_RANGE = 175 // sparkar på avstånd · ingen kroppskontakt
+const LEON_KICK_WINDUP_MS = 280
 const POLICE_REWARD = 9999
 const POLICE_SPEED = 10
 const POLICE_RADIUS = 26
@@ -95,6 +97,8 @@ const NERMIN_SCALE = 1.55
 const ALI_CODE = 'ali'
 const GRON_BOSS_CODE = 'grön boss'
 const MJOLK_CODE = 'mjölk'
+const RED_COINS_CODE = '000'
+const RED_COINS_CODE_REWARD = 500
 const RPG_DAMAGE = 5 // Lv5=5, Lv6=6, Lv7=7, Lv8=8
 const RPG_FIRE_DAMAGE = 1 // eld per sekund
 const RPG_FIRE_TICK_MS = 1000
@@ -1887,23 +1891,27 @@ function FightingBalls() {
       const dist = Math.hypot(dx, dy) || 1
       const nx = dx / dist
       const ny = dy / dist
+      // Boll startar vid Leons fot · flyger mot målet (inte kroppsslag)
       footballs.push({
-        x: leon.x + nx * (leon.r + LEON_BALL_RADIUS),
-        y: leon.y + ny * (leon.r + LEON_BALL_RADIUS),
+        x: leon.x + nx * (leon.r * 0.35),
+        y: leon.y + ny * (leon.r * 0.35) + leon.r * 0.45,
         vx: nx * LEON_BALL_SPEED,
         vy: ny * LEON_BALL_SPEED,
         r: LEON_BALL_RADIUS,
         damage: LEON_FOOTBALL_DAMAGE,
         owner: leon.owner,
-        angry: leon.angry,
-        life: 4,
+        angry: !!leon.angry,
+        life: 5,
         spin: 0,
+        // Kort immunitet så bollen hinner lämna Leon innan träff-check
+        armAt: performance.now() + 80,
       })
-      spawnBurst(leon.x + nx * leon.r, leon.y + ny * leon.r, 1.6)
-      shake = Math.min(16, shake + 7)
+      spawnBurst(leon.x + nx * leon.r * 0.6, leon.y + ny * leon.r * 0.6 + leon.r * 0.4, 0.9)
+      shake = Math.min(10, shake + 3)
     }
 
     function updateLeon(dt) {
+      const now = performance.now()
       for (let i = leonUnits.length - 1; i >= 0; i -= 1) {
         const L = leonUnits[i]
         L.life -= dt * 0.02
@@ -1917,23 +1925,37 @@ function FightingBalls() {
           const dx = aimX - L.x
           const dy = aimY - L.y
           const dist = Math.hypot(dx, dy) || 1
-          L.vx += (dx / dist) * 0.75 * dt
-          L.vy += (dy / dist) * 0.75 * dt
-          const sp = Math.hypot(L.vx, L.vy)
-          if (sp > LEON_SPEED) {
-            L.vx = (L.vx / sp) * LEON_SPEED
-            L.vy = (L.vy / sp) * LEON_SPEED
+          // Håll avstånd · spring inte in i målet
+          if (dist > LEON_KICK_RANGE) {
+            L.vx += (dx / dist) * 0.75 * dt
+            L.vy += (dy / dist) * 0.75 * dt
+            const sp = Math.hypot(L.vx, L.vy)
+            if (sp > LEON_SPEED) {
+              L.vx = (L.vx / sp) * LEON_SPEED
+              L.vy = (L.vy / sp) * LEON_SPEED
+            }
+            L.x += L.vx * dt
+            L.y += L.vy * dt
+          } else {
+            L.vx *= 0.5
+            L.vy *= 0.5
+            L.phase = 'windup'
+            L.kickAt = now + LEON_KICK_WINDUP_MS
+            L.face = dx >= 0 ? 1 : -1
+            L.knifeAngle = Math.atan2(dy, dx)
           }
-          L.x += L.vx * dt
-          L.y += L.vy * dt
           L.face = L.vx >= 0 ? 1 : -1
-          const kickDist = getRadius(L.target) + L.r + 55
-          if (dist < kickDist) {
+        } else if (L.phase === 'windup') {
+          L.vx *= 0.7
+          L.vy *= 0.7
+          const dx = L.target.x - L.x
+          const dy = L.target.y - L.y
+          L.face = dx >= 0 ? 1 : -1
+          if (now >= (L.kickAt || 0)) {
             kickFootball(L)
             L.phase = 'leave'
             L.leaveAng = Math.atan2(L.y - cy, L.x - cx)
             L.life = Math.min(L.life, 2.2)
-            spawnBurst(L.x, L.y, 1.2)
           }
         } else if (L.phase === 'leave') {
           const ang = L.leaveAng || Math.atan2(L.y - cy, L.x - cx)
@@ -1962,6 +1984,7 @@ function FightingBalls() {
           footballs.splice(i, 1)
           continue
         }
+        if (performance.now() < (b.armAt || 0)) continue
         let hit = false
         for (let j = 0; j < fighters.length; j += 1) {
           const f = fighters[j]
@@ -1974,7 +1997,7 @@ function FightingBalls() {
           } else if (f === b.owner || f.isBoss) {
             continue
           }
-          const prox = getRadius(f) + b.r + PROJECTILE_HIT_PAD * 0.5
+          const prox = getRadius(f) + b.r + 8
           const dNow = Math.hypot(f.x - b.x, f.y - b.y)
           const dSweep = distPointToSegment(f.x, f.y, prevX, prevY, b.x, b.y)
           if (dNow < prox || dSweep < prox) {
@@ -1983,11 +2006,11 @@ function FightingBalls() {
               if (f.isBoss) addBossDamage(b.owner, b.damage)
             }
             f.squash = 0.75
-            f.vx += b.vx * 0.35
-            f.vy += b.vy * 0.35
-            spawnBurst(b.x, b.y, 2.4)
-            shake = Math.min(22, shake + 12)
-            flash = Math.min(0.7, flash + 0.35)
+            f.vx += b.vx * 0.45
+            f.vy += b.vy * 0.45
+            spawnBurst(b.x, b.y, 1.8)
+            shake = Math.min(18, shake + 8)
+            flash = Math.min(0.55, flash + 0.25)
             triggerCheer()
             hit = true
             break
@@ -2034,12 +2057,13 @@ function FightingBalls() {
       ctx.arc(-r * 0.22, -r * 0.1, r * 0.09, 0, Math.PI * 2)
       ctx.arc(r * 0.22, -r * 0.1, r * 0.09, 0, Math.PI * 2)
       ctx.fill()
-      // Fotboll i hand/fot när han springer
-      if (L.phase === 'run') {
+      // Fotboll vid foten · synlig tills han sparkar
+      if (L.phase === 'run' || L.phase === 'windup') {
         ctx.save()
-        ctx.translate(r * 0.75, r * 0.55)
-        ctx.rotate(L.spin || 0)
-        drawFootballIcon(LEON_BALL_RADIUS * 0.7)
+        const kickLift = L.phase === 'windup' ? -r * 0.15 : 0
+        ctx.translate(r * 0.55, r * 0.65 + kickLift)
+        ctx.rotate(L.phase === 'windup' ? -0.6 : 0.2)
+        drawFootballIcon(LEON_BALL_RADIUS * 0.75)
         ctx.restore()
       }
       ctx.restore()
@@ -4316,6 +4340,15 @@ function FightingBalls() {
         codesMessage = 'Koden är avstängd (mjölk)'
         codesMessageUntil = performance.now() + 2000
         codesInput = ''
+        return
+      }
+      if (typed === RED_COINS_CODE) {
+        redCoins += RED_COINS_CODE_REWARD
+        codesMessage = `Röd +${RED_COINS_CODE_REWARD} coins`
+        codesMessageUntil = performance.now() + 2500
+        codesInput = ''
+        spawnBurst(cx, cy, 1.6)
+        triggerCheer()
         return
       }
       if (typed === SECRET_CODE) {
@@ -6839,7 +6872,8 @@ function FightingBalls() {
               typed === NERMIN_CODE ||
               typed === ALI_CODE ||
               typed === GRON_BOSS_CODE ||
-              typed === MJOLK_CODE
+              typed === MJOLK_CODE ||
+              typed === RED_COINS_CODE
             ) {
               submitCode()
             }
