@@ -210,11 +210,17 @@ const WALL_THICK = 18
 const SCORE_WHEEL_SEGMENTS = [
   { id: 'nuke', label: 'NUKE', rarity: 'jackpot', color: '#ef4444' },
   { id: 'hammer', label: 'Hammare', rarity: 'better', color: '#a16207' },
-  { id: 'coins25', label: '+25 🪙', rarity: 'good', color: '#eab308' },
-  { id: 'lifeDrink', label: 'Livedryck', rarity: 'good', color: '#22c55e' },
-  { id: 'sus', label: 'Sus', rarity: 'common', color: '#16a34a' },
-  { id: 'mcShield', label: 'MC-sköld', rarity: 'common', color: '#0ea5e9' },
 ]
+const PET_SELECT_AT = 15
+const PET_LOSE_AT = 20
+const PET_RADIUS = 14
+const PET_FOLLOW_SPEED = 9
+const PET_ABILITY_COOLDOWN = 6000
+const CAT_LATCH_DAMAGE = 2
+const CAT_LATCH_TICK_MS = 1000
+const CAT_LATCH_DURATION_MS = 4000
+const DOG_BITE_DAMAGE = 4
+const DOG_LUNGE_SPEED = 16
 
 const PALETTE = [
   { color: '#ff4d3a', glow: '#ff8a70' },
@@ -250,6 +256,7 @@ function FightingBalls() {
     const pingBalls = []
     const arrows = []
     const bodyguards = []
+    const pets = []
     const farts = []
     const policeUnits = []
     const leonUnits = []
@@ -275,6 +282,10 @@ function FightingBalls() {
     let swResultUntil = 0
     let swNeedSpin = false
     let pendingScoreWheel = null
+    let petSelectOpen = false
+    let petSelectSide = null
+    const petSelectHits = []
+    let pendingPetSelect = null
     let shake = 0
     let flash = 0
     let cheer = 0
@@ -378,6 +389,10 @@ function FightingBalls() {
       scoreWheelDoneBlue: false,
       nukeUsedRed: false,
       nukeUsedBlue: false,
+      petRed: null, // 'dog' | 'cat' | null
+      petBlue: null,
+      petSelectDoneRed: false,
+      petSelectDoneBlue: false,
     }
 
     const fighters = []
@@ -3255,6 +3270,10 @@ function FightingBalls() {
         bodyguards[i].expiresAt += ms
         bodyguards[i].nextTick += ms
       }
+      for (let i = 0; i < pets.length; i += 1) {
+        if (pets[i].readyAt > 0) pets[i].readyAt += ms
+        if (pets[i].latchUntil > 0) pets[i].latchUntil += ms
+      }
       for (let i = 0; i < farts.length; i += 1) {
         if (farts[i].expiresAt > 0) farts[i].expiresAt += ms
         if (farts[i].nextTick > 0) farts[i].nextTick += ms
@@ -3318,6 +3337,24 @@ function FightingBalls() {
       // Poäng 14: förlora hjul-belöning
       if (score >= SCORE_REWARD_LOSE_AT) {
         clearScoreReward(side)
+      }
+
+      // Poäng 15: välj hund eller katt
+      if (score >= PET_SELECT_AT && score < PET_LOSE_AT) {
+        if (side === 'red' && !inventory.petSelectDoneRed) {
+          inventory.petSelectDoneRed = true
+          if (isShopMilestone(score)) pendingPetSelect = 'red'
+          else openPetSelect('red')
+        } else if (side === 'blue' && !inventory.petSelectDoneBlue) {
+          inventory.petSelectDoneBlue = true
+          if (isShopMilestone(score)) pendingPetSelect = 'blue'
+          else openPetSelect('blue')
+        }
+      }
+
+      // Poäng 20: djur borta
+      if (score >= PET_LOSE_AT) {
+        clearPet(side)
       }
 
       const atShop = isShopMilestone(score)
@@ -3387,10 +3424,417 @@ function FightingBalls() {
       scoreWheelSide = null
       swPending = null
       swNeedSpin = false
-      if (shopPausedAt > 0 && !shopOpen && !killstreakOpen) {
+      if (pendingPetSelect) {
+        const side = pendingPetSelect
+        pendingPetSelect = null
+        openPetSelect(side)
+        return
+      }
+      if (pendingBossAfterShop && !bossMode && !winner) {
+        pendingBossAfterShop = false
+        if (shopPausedAt > 0 && !shopOpen && !killstreakOpen && !petSelectOpen) {
+          shiftPausedTimers(performance.now() - shopPausedAt)
+          shopPausedAt = 0
+        }
+        startBossFight()
+        return
+      }
+      if (shopPausedAt > 0 && !shopOpen && !killstreakOpen && !petSelectOpen) {
         shiftPausedTimers(performance.now() - shopPausedAt)
         shopPausedAt = 0
       }
+    }
+
+    function getOwnerForSide(side) {
+      if (side === 'red') return fighters.find((f) => f.player)
+      return fighters.find((f) => f.control === 'arrows')
+    }
+
+    function getEnemyForSide(side) {
+      if (side === 'red') return fighters.find((f) => f.control === 'arrows')
+      return fighters.find((f) => f.player)
+    }
+
+    function clearPet(side) {
+      const had = side === 'red' ? inventory.petRed : inventory.petBlue
+      if (side === 'red') inventory.petRed = null
+      else inventory.petBlue = null
+      for (let i = pets.length - 1; i >= 0; i -= 1) {
+        if (pets[i].side === side) pets.splice(i, 1)
+      }
+      if (had) {
+        killstreakMessage = `${side === 'red' ? 'Röd' : 'Blå'} förlorade sitt djur (poäng ${PET_LOSE_AT})`
+        killstreakMessageUntil = performance.now() + 2800
+      }
+    }
+
+    function openPetSelect(side) {
+      if (petSelectOpen || scoreWheelOpen || killstreakOpen || shopOpen) {
+        if (!pendingPetSelect) pendingPetSelect = side
+        return
+      }
+      if (!shopPausedAt) {
+        clearKeys()
+        shopPausedAt = performance.now()
+      }
+      petSelectSide = side
+      petSelectOpen = true
+    }
+
+    function nextPendingPetSelect() {
+      if (pendingPetSelect) {
+        const side = pendingPetSelect
+        pendingPetSelect = null
+        openPetSelect(side)
+        return true
+      }
+      if (inventory.petSelectDoneRed && !inventory.petRed) {
+        openPetSelect('red')
+        return true
+      }
+      if (inventory.petSelectDoneBlue && !inventory.petBlue) {
+        openPetSelect('blue')
+        return true
+      }
+      return false
+    }
+
+    function closePetSelect() {
+      if (!petSelectOpen) return
+      petSelectOpen = false
+      petSelectSide = null
+      if (nextPendingPetSelect()) return
+      if (pendingBossAfterShop && !bossMode && !winner) {
+        pendingBossAfterShop = false
+        if (shopPausedAt > 0 && !shopOpen && !killstreakOpen && !scoreWheelOpen) {
+          shiftPausedTimers(performance.now() - shopPausedAt)
+          shopPausedAt = 0
+        }
+        startBossFight()
+        return
+      }
+      if (shopPausedAt > 0 && !shopOpen && !killstreakOpen && !scoreWheelOpen) {
+        shiftPausedTimers(performance.now() - shopPausedAt)
+        shopPausedAt = 0
+      }
+    }
+
+    function applyPetPick(side, kind) {
+      if (kind !== 'dog' && kind !== 'cat') return
+      if (side === 'red') inventory.petRed = kind
+      else inventory.petBlue = kind
+      spawnPet(side, kind)
+      killstreakMessage = `${side === 'red' ? 'Röd' : 'Blå'} valde ${kind === 'dog' ? 'hund' : 'katt'}!`
+      killstreakMessageUntil = performance.now() + 2800
+      closePetSelect()
+    }
+
+    function spawnPet(side, kind) {
+      for (let i = pets.length - 1; i >= 0; i -= 1) {
+        if (pets[i].side === side) pets.splice(i, 1)
+      }
+      const owner = getOwnerForSide(side)
+      if (!owner) return
+      const ang = side === 'red' ? 0.8 : -0.8
+      pets.push({
+        kind,
+        side,
+        owner,
+        x: owner.x + Math.cos(ang) * (ballR + PET_RADIUS + 8),
+        y: owner.y + Math.sin(ang) * (ballR + PET_RADIUS + 8),
+        vx: 0,
+        vy: 0,
+        r: PET_RADIUS,
+        mode: 'follow',
+        latchTarget: null,
+        latchUntil: 0,
+        readyAt: 0,
+        face: side === 'red' ? 1 : -1,
+        squash: 0,
+      })
+    }
+
+    function usePetAbility(side) {
+      const pet = pets.find((p) => p.side === side)
+      if (!pet || !pet.owner || pet.owner.eliminated || pet.owner.lives <= 0) return
+      const now = performance.now()
+      if (now < (pet.readyAt || 0)) return
+      if (pet.mode !== 'follow') return
+      const enemy = getEnemyForSide(side)
+      if (!enemy || enemy.eliminated || enemy.lives <= 0) return
+      pet.readyAt = now + PET_ABILITY_COOLDOWN
+      if (pet.kind === 'cat') {
+        pet.mode = 'pounce'
+        pet.latchTarget = enemy
+      } else {
+        pet.mode = 'lunge'
+        pet.latchTarget = enemy
+      }
+    }
+
+    function updatePets(dt, now) {
+      for (let i = pets.length - 1; i >= 0; i -= 1) {
+        const p = pets[i]
+        const owner = getOwnerForSide(p.side)
+        p.owner = owner
+        if (!owner || owner.eliminated) {
+          pets.splice(i, 1)
+          continue
+        }
+        p.squash *= 0.88
+
+        if (p.mode === 'latch') {
+          const t = p.latchTarget
+          if (!t || t.eliminated || t.lives <= 0 || now >= p.latchUntil) {
+            p.mode = 'follow'
+            p.latchTarget = null
+            p.latchUntil = 0
+          } else {
+            p.x = t.x + (p.side === 'red' ? -1 : 1) * (getRadius(t) * 0.35)
+            p.y = t.y - getRadius(t) * 0.85
+            p.vx = 0
+            p.vy = 0
+            continue
+          }
+        }
+
+        let tx = owner.x
+        let ty = owner.y
+        let speed = PET_FOLLOW_SPEED
+        if (p.mode === 'pounce' || p.mode === 'lunge') {
+          const t = p.latchTarget
+          if (!t || t.eliminated || t.lives <= 0) {
+            p.mode = 'follow'
+            p.latchTarget = null
+          } else {
+            tx = t.x
+            ty = t.y
+            speed = p.mode === 'lunge' ? DOG_LUNGE_SPEED : 14
+            const near = Math.hypot(t.x - p.x, t.y - p.y)
+            if (near < getRadius(t) + p.r + 6) {
+              if (p.kind === 'cat' && p.mode === 'pounce') {
+                p.mode = 'latch'
+                p.latchUntil = now + CAT_LATCH_DURATION_MS
+                applyBurn(t, owner, now, {
+                  damage: CAT_LATCH_DAMAGE,
+                  tickMs: CAT_LATCH_TICK_MS,
+                  durationMs: CAT_LATCH_DURATION_MS,
+                })
+                t.burnNextTick = now // första tick direkt · 2/s i 4s
+                t.squash = 0.45
+                spawnBurst(t.x, t.y, 0.9)
+                shake = Math.min(14, shake + 4)
+              } else if (p.kind === 'dog' && p.mode === 'lunge') {
+                if (!isShielded(t, now)) {
+                  t.lives -= DOG_BITE_DAMAGE
+                  if (t.isBoss) addBossDamage(owner, DOG_BITE_DAMAGE)
+                }
+                const ang = Math.atan2(t.y - p.y, t.x - p.x)
+                t.vx += Math.cos(ang) * 10
+                t.vy += Math.sin(ang) * 10
+                t.squash = 0.55
+                spawnBurst(t.x, t.y, 1)
+                shake = Math.min(16, shake + 6)
+                p.mode = 'follow'
+                p.latchTarget = null
+                p.squash = 0.4
+              }
+              continue
+            }
+          }
+        }
+
+        if (p.mode === 'follow') {
+          const ang = p.side === 'red' ? 2.4 : 0.7
+          tx = owner.x + Math.cos(ang) * (ballR + p.r + 10)
+          ty = owner.y + Math.sin(ang) * (ballR + p.r + 10)
+        }
+
+        const dx = tx - p.x
+        const dy = ty - p.y
+        const dist = Math.hypot(dx, dy) || 1
+        if (dist > 2) {
+          p.vx += (dx / dist) * 0.7 * dt
+          p.vy += (dy / dist) * 0.7 * dt
+        }
+        p.vx *= 0.9
+        p.vy *= 0.9
+        const sp = Math.hypot(p.vx, p.vy)
+        if (sp > speed) {
+          p.vx = (p.vx / sp) * speed
+          p.vy = (p.vy / sp) * speed
+        }
+        p.x += p.vx * dt
+        p.y += p.vy * dt
+        if (Math.abs(p.vx) > 0.2) p.face = p.vx > 0 ? 1 : -1
+
+        const adx = p.x - cx
+        const ady = p.y - cy
+        const adist = Math.hypot(adx, ady)
+        const limit = arenaR - p.r
+        if (adist > limit) {
+          p.x = cx + (adx / adist) * limit
+          p.y = cy + (ady / adist) * limit
+        }
+      }
+    }
+
+    function drawPet(p) {
+      const squash = Math.min(0.4, p.squash || 0)
+      ctx.save()
+      ctx.translate(p.x, p.y)
+      ctx.scale((1 + squash * 0.15) * p.face, Math.max(0.75, 1 - squash * 0.25))
+
+      if (p.kind === 'cat') {
+        const body = ctx.createRadialGradient(-4, -4, 2, 0, 0, p.r)
+        body.addColorStop(0, '#fbbf24')
+        body.addColorStop(0.5, '#f59e0b')
+        body.addColorStop(1, '#b45309')
+        ctx.fillStyle = body
+        ctx.beginPath()
+        ctx.ellipse(0, 2, p.r * 0.95, p.r * 0.75, 0, 0, Math.PI * 2)
+        ctx.fill()
+        // öron
+        ctx.fillStyle = '#d97706'
+        ctx.beginPath()
+        ctx.moveTo(-p.r * 0.55, -p.r * 0.15)
+        ctx.lineTo(-p.r * 0.2, -p.r * 1.05)
+        ctx.lineTo(0, -p.r * 0.2)
+        ctx.closePath()
+        ctx.fill()
+        ctx.beginPath()
+        ctx.moveTo(p.r * 0.55, -p.r * 0.15)
+        ctx.lineTo(p.r * 0.2, -p.r * 1.05)
+        ctx.lineTo(0, -p.r * 0.2)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = '#1c1917'
+        ctx.beginPath()
+        ctx.arc(-p.r * 0.28, -p.r * 0.05, 2.2, 0, Math.PI * 2)
+        ctx.arc(p.r * 0.28, -p.r * 0.05, 2.2, 0, Math.PI * 2)
+        ctx.fill()
+        if (p.mode === 'latch') {
+          ctx.strokeStyle = 'rgba(239,68,68,0.7)'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.arc(0, 0, p.r * 1.35, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+      } else {
+        const body = ctx.createRadialGradient(-4, -4, 2, 0, 0, p.r)
+        body.addColorStop(0, '#d6d3d1')
+        body.addColorStop(0.45, '#a8a29e')
+        body.addColorStop(1, '#57534e')
+        ctx.fillStyle = body
+        ctx.beginPath()
+        ctx.ellipse(0, 2, p.r * 1.05, p.r * 0.8, 0, 0, Math.PI * 2)
+        ctx.fill()
+        // öron
+        ctx.fillStyle = '#78716c'
+        ctx.beginPath()
+        ctx.ellipse(-p.r * 0.55, -p.r * 0.55, p.r * 0.28, p.r * 0.38, -0.3, 0, Math.PI * 2)
+        ctx.ellipse(p.r * 0.55, -p.r * 0.55, p.r * 0.28, p.r * 0.38, 0.3, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#1c1917'
+        ctx.beginPath()
+        ctx.arc(-p.r * 0.28, -p.r * 0.05, 2.2, 0, Math.PI * 2)
+        ctx.arc(p.r * 0.28, -p.r * 0.05, 2.2, 0, Math.PI * 2)
+        ctx.fill()
+        // nos
+        ctx.fillStyle = '#44403c'
+        ctx.beginPath()
+        ctx.ellipse(p.r * 0.55, p.r * 0.15, 3.5, 2.5, 0, 0, Math.PI * 2)
+        ctx.fill()
+      }
+
+      ctx.restore()
+    }
+
+    function drawPetSelect() {
+      petSelectHits.length = 0
+      if (!petSelectOpen || !petSelectSide) return
+      const side = petSelectSide
+      const isRed = side === 'red'
+      const panelW = Math.min(460, width * 0.92)
+      const panelH = Math.min(360, height * 0.7)
+      const px = width * 0.5 - panelW * 0.5
+      const py = height * 0.5 - panelH * 0.5
+
+      ctx.save()
+      ctx.fillStyle = 'rgba(0,0,0,0.75)'
+      ctx.fillRect(0, 0, width, height)
+      ctx.fillStyle = '#1a1520'
+      ctx.strokeStyle = isRed ? '#ff6b5a' : '#5ec8ff'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(px, py, panelW, panelH, 16)
+      else ctx.rect(px, py, panelW, panelH)
+      ctx.fill()
+      ctx.stroke()
+
+      ctx.fillStyle = '#ffe9a0'
+      ctx.font = 'bold 28px Syne, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(`VÄLJ DJUR · ${isRed ? 'RÖD' : 'BLÅ'}`, width * 0.5, py + 36)
+      ctx.fillStyle = 'rgba(255,255,255,0.65)'
+      ctx.font = '14px Figtree, sans-serif'
+      ctx.fillText(
+        isRed ? 'Q = hund · E = katt' : '1 = hund · 2 = katt',
+        width * 0.5,
+        py + 64,
+      )
+
+      const btnW = Math.min(170, panelW * 0.38)
+      const btnH = 140
+      const gap = 24
+      const dogX = width * 0.5 - btnW - gap * 0.5
+      const catX = width * 0.5 + gap * 0.5
+      const by = py + 100
+
+      const options = [
+        {
+          id: 'dog',
+          x: dogX,
+          label: 'Hund',
+          sub: `Biter · ${DOG_BITE_DAMAGE} skada`,
+          color: '#a8a29e',
+        },
+        {
+          id: 'cat',
+          x: catX,
+          label: 'Katt',
+          sub: `Hoppar på · ${CAT_LATCH_DAMAGE}/s · ${CAT_LATCH_DURATION_MS / 1000}s`,
+          color: '#f59e0b',
+        },
+      ]
+
+      options.forEach((opt) => {
+        ctx.fillStyle = '#2a2433'
+        ctx.strokeStyle = opt.color
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(opt.x, by, btnW, btnH, 12)
+        else ctx.rect(opt.x, by, btnW, btnH)
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = '#ffffff'
+        ctx.font = 'bold 24px Figtree, sans-serif'
+        ctx.fillText(opt.label, opt.x + btnW * 0.5, by + 48)
+        ctx.fillStyle = 'rgba(255,255,255,0.7)'
+        ctx.font = '13px Figtree, sans-serif'
+        ctx.fillText(opt.sub, opt.x + btnW * 0.5, by + 84)
+        petSelectHits.push({ x: opt.x, y: by, w: btnW, h: btnH, id: opt.id })
+      })
+
+      ctx.fillStyle = 'rgba(255,255,255,0.45)'
+      ctx.font = '12px Figtree, sans-serif'
+      ctx.fillText(
+        `Djur ${PET_SELECT_AT}–${PET_LOSE_AT} poäng · ${isRed ? 'C' : '4'} = attack`,
+        width * 0.5,
+        py + panelH - 28,
+      )
+      ctx.restore()
     }
 
     function startScoreWheelSpin() {
@@ -4041,7 +4485,15 @@ function FightingBalls() {
       if (pendingScoreWheel) {
         const side = pendingScoreWheel
         pendingScoreWheel = null
+        if (startBoss) pendingBossAfterShop = true
         openScoreWheel(side)
+        return
+      }
+      if (pendingPetSelect) {
+        const side = pendingPetSelect
+        pendingPetSelect = null
+        if (startBoss) pendingBossAfterShop = true
+        openPetSelect(side)
         return
       }
       if (startBoss && !bossMode && !winner) {
@@ -4705,7 +5157,7 @@ function FightingBalls() {
         {
           id: 'mcShieldBlue',
           title: 'Minecraft-sköld',
-          desc: `B · 2 · odödlig ${MC_SHIELD_DURATION / 1000}s`,
+          desc: `B · 3 · odödlig ${MC_SHIELD_DURATION / 1000}s`,
           cost: shopPrice(MC_SHIELD_COST),
           side: 'Blå',
           owned: inventory.mcShieldBlue,
@@ -4723,7 +5175,7 @@ function FightingBalls() {
         {
           id: 'lifeDrinkBlue',
           title: 'Livedryck',
-          desc: `B · 3 · +${LIFE_DRINK_HEAL} liv (fullt = +max)`,
+          desc: `B · 2 · +${LIFE_DRINK_HEAL} liv (fullt = +max)`,
           cost: shopPrice(LIFE_DRINK_COST),
           side: 'Blå',
           owned: inventory.lifeDrinkBlue,
@@ -5507,6 +5959,10 @@ function FightingBalls() {
       inventory.scoreWheelDoneBlue = false
       inventory.nukeUsedRed = false
       inventory.nukeUsedBlue = false
+      inventory.petRed = null
+      inventory.petBlue = null
+      inventory.petSelectDoneRed = false
+      inventory.petSelectDoneBlue = false
       killstreakMessage = ''
       killstreakMessageUntil = 0
       killstreakOpen = false
@@ -5519,6 +5975,10 @@ function FightingBalls() {
       swPending = null
       swNeedSpin = false
       pendingScoreWheel = null
+      petSelectOpen = false
+      petSelectSide = null
+      pendingPetSelect = null
+      pets.length = 0
       eventPistolActive = false
       eventPistolGranted = false
       walls.length = 0
@@ -5588,6 +6048,14 @@ function FightingBalls() {
         ctx.strokeText('NUKE · T', 28, 142)
         ctx.fillText('NUKE · T', 28, 142)
       }
+      if (inventory.petRed) {
+        const petY = inventory.scoreRewardRed === 'nuke' && !inventory.nukeUsedRed ? 160 : 142
+        ctx.font = '600 12px Figtree, sans-serif'
+        ctx.fillStyle = inventory.petRed === 'cat' ? '#f59e0b' : '#a8a29e'
+        const petLabel = inventory.petRed === 'cat' ? 'Katt · C' : 'Hund · C'
+        ctx.strokeText(petLabel, 28, petY)
+        ctx.fillText(petLabel, 28, petY)
+      }
       ctx.restore()
 
       drawCoin(width - 28, 98, size)
@@ -5636,6 +6104,14 @@ function FightingBalls() {
         ctx.fillStyle = '#ef4444'
         ctx.strokeText('NUKE · 7', width - 28, 142)
         ctx.fillText('NUKE · 7', width - 28, 142)
+      }
+      if (inventory.petBlue) {
+        const petY = inventory.scoreRewardBlue === 'nuke' && !inventory.nukeUsedBlue ? 160 : 142
+        ctx.font = '600 12px Figtree, sans-serif'
+        ctx.fillStyle = inventory.petBlue === 'cat' ? '#f59e0b' : '#a8a29e'
+        const petLabel = inventory.petBlue === 'cat' ? 'Katt · 4' : 'Hund · 4'
+        ctx.strokeText(petLabel, width - 28, petY)
+        ctx.fillText(petLabel, width - 28, petY)
       }
       ctx.restore()
     }
@@ -6534,7 +7010,8 @@ function FightingBalls() {
           weaponSelectOpen ||
           nokiaDialOpen ||
           killstreakOpen ||
-          scoreWheelOpen
+          scoreWheelOpen ||
+          petSelectOpen
         ) {
           last = now
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -6573,6 +7050,9 @@ function FightingBalls() {
           for (let i = 0; i < bodyguards.length; i += 1) {
             drawBodyguard(bodyguards[i])
           }
+          for (let i = 0; i < pets.length; i += 1) {
+            drawPet(pets[i])
+          }
           drawScores()
           drawShopButton()
           drawGoldCoins()
@@ -6585,6 +7065,7 @@ function FightingBalls() {
           drawNokiaDial()
           drawKillstreakWheel()
           drawScoreWheel()
+          drawPetSelect()
           return
         }
 
@@ -6602,6 +7083,7 @@ function FightingBalls() {
         updatePingBalls(dt)
         updateArrows(dt)
         updateBodyguards(dt, now)
+        updatePets(dt, now)
         updateFarts(dt, now)
         updateBurns(dt, now)
         updatePolice(dt)
@@ -6719,6 +7201,10 @@ function FightingBalls() {
           drawBodyguard(bodyguards[i])
         }
 
+        for (let i = 0; i < pets.length; i += 1) {
+          drawPet(pets[i])
+        }
+
         ctx.restore()
 
         // HUD
@@ -6734,6 +7220,7 @@ function FightingBalls() {
         drawNokiaDial()
         drawKillstreakWheel()
         drawScoreWheel()
+        drawPetSelect()
 
         if (flash > 0.02) {
           ctx.fillStyle = `rgba(255,250,230,${flash * 0.35})`
@@ -6803,6 +7290,10 @@ function FightingBalls() {
           closeScoreWheel()
           return
         }
+        if (petSelectOpen) {
+          // måste välja djur
+          return
+        }
         if (killstreakOpen) {
           closeKillstreak()
           return
@@ -6810,6 +7301,22 @@ function FightingBalls() {
         closeShop()
         closeCodes()
         closeNokiaDial()
+        return
+      }
+      if (petSelectOpen) {
+        e.preventDefault()
+        if (!e.repeat && petSelectSide) {
+          if (petSelectSide === 'red') {
+            if (k === 'q') applyPetPick('red', 'dog')
+            else if (k === 'e') applyPetPick('red', 'cat')
+          } else {
+            if (k === '1' || e.code === 'Digit1' || e.code === 'Numpad1') {
+              applyPetPick('blue', 'dog')
+            } else if (k === '2' || e.code === 'Digit2' || e.code === 'Numpad2') {
+              applyPetPick('blue', 'cat')
+            }
+          }
+        }
         return
       }
       if (nokiaDialOpen) {
@@ -6881,7 +7388,7 @@ function FightingBalls() {
         }
         return
       }
-      if (shopOpen || scoreWheelOpen || killstreakOpen) return
+      if (shopOpen || scoreWheelOpen || killstreakOpen || petSelectOpen) return
       if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
         keys[k] = true
         e.preventDefault()
@@ -6963,13 +7470,23 @@ function FightingBalls() {
       if ((k === '2' || e.code === 'Digit2' || e.code === 'Numpad2') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
-        if (blue) useMcShield(blue, 'blue')
+        if (blue) useLifeDrink(blue, 'blue')
         return
       }
       if ((k === '3' || e.code === 'Digit3' || e.code === 'Numpad3') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
-        if (blue) useLifeDrink(blue, 'blue')
+        if (blue) useMcShield(blue, 'blue')
+        return
+      }
+      if ((k === '4' || e.code === 'Digit4' || e.code === 'Numpad4') && !e.repeat) {
+        e.preventDefault()
+        usePetAbility('blue')
+        return
+      }
+      if (k === 'c' && !e.repeat) {
+        e.preventDefault()
+        usePetAbility('red')
         return
       }
       if ((k === '7' || e.code === 'Digit7' || e.code === 'Numpad7') && !e.repeat) {
@@ -7087,6 +7604,16 @@ function FightingBalls() {
         return
       }
 
+      if (petSelectOpen) {
+        for (let i = petSelectHits.length - 1; i >= 0; i -= 1) {
+          const hit = petSelectHits[i]
+          if (!hitRect(px, py, hit)) continue
+          if (hit.id === 'dog' || hit.id === 'cat') applyPetPick(petSelectSide, hit.id)
+          return
+        }
+        return
+      }
+
       if (killstreakOpen) {
         for (let i = killstreakHits.length - 1; i >= 0; i -= 1) {
           const hit = killstreakHits[i]
@@ -7137,6 +7664,9 @@ function FightingBalls() {
       if (inventory.nokiaBlue && hitRect(px, py, nokiaDialButtonBlue)) over = true
       if (scoreWheelOpen) {
         over = scoreWheelHits.some((h) => hitRect(px, py, h)) || true
+      }
+      if (petSelectOpen) {
+        over = petSelectHits.some((h) => hitRect(px, py, h)) || true
       }
       if (killstreakOpen) {
         over = killstreakHits.some((h) => hitRect(px, py, h)) || true
