@@ -201,12 +201,14 @@ const EVENT_PISTOL_END = 10
 const EVENT_PISTOL_DAMAGE = 2
 const SCORE_WHEEL_AT = 10
 const SCORE_REWARD_LOSE_AT = 14
-const HAMMER_DAMAGE = 5
+const HAMMER_DAMAGE = 4
 const HAMMER_COOLDOWN = 420
 const HAMMER_SWING_MS = 300
 const HAMMER_REACH = 78
-const WALL_LEN = 78
+const WALL_MAX = 3
 const WALL_THICK = 18
+const NUKE_SPEED = 14
+const NUKE_RADIUS = 22
 const SCORE_WHEEL_SEGMENTS = [
   { id: 'nuke', label: 'NUKE', rarity: 'jackpot', color: '#ef4444' },
   { id: 'hammer', label: 'Hammare', rarity: 'better', color: '#a16207' },
@@ -264,6 +266,8 @@ function FightingBalls() {
     const poisonFlasks = []
     const poisonPools = []
     const walls = []
+    const nukes = []
+    let nukeFlash = 0 // kall blåvit flash vid träff
     let leonCallsRed = 0
     let leonCallsBlue = 0
     let eventPistolActive = false
@@ -430,7 +434,7 @@ function FightingBalls() {
         control: isPlayer ? 'wasd' : paletteIndex === 1 ? 'arrows' : null,
         shieldUntil: 0,
         shieldKind: null, // 'basic' | 'mc'
-        shieldUses: isPlayer ? SHIELD_USES_PER_ROUND : 0,
+        shieldUses: 0,
         bombReadyAt: 0,
         bombUses: 0,
         knifeEquipped: false,
@@ -2925,6 +2929,17 @@ function FightingBalls() {
       )
     }
 
+    function randomArenaSpawn() {
+      const margin = ballR + 12
+      const maxR = Math.max(20, arenaR - margin)
+      const ang = Math.random() * Math.PI * 2
+      const dist = Math.sqrt(Math.random()) * maxR
+      return {
+        x: cx + Math.cos(ang) * dist,
+        y: cy + Math.sin(ang) * dist,
+      }
+    }
+
     function reviveFighter(ball, now) {
       const isRed = ball.player || ball._bossSide === 'red'
       ball.maxLives = isRed ? PLAYER_LIVES : ENEMY_LIVES
@@ -2952,34 +2967,27 @@ function FightingBalls() {
           ball.control = 'wasd'
           ball.player = true
           ball._bossSide = 'red'
-          ball.shieldUses = SHIELD_USES_PER_ROUND
+          ball.shieldUses = 0
           ball.bombUses = 0
-          ball.x = cx - arenaR * 0.3
         } else {
           ball.control = 'arrows'
           ball.player = false
           ball._bossSide = 'blue'
           ball.shieldUses = 0
-          ball.x = cx + arenaR * 0.3
         }
-        ball.y = cy
-        keepInArena(ball)
-        spawnBurst(ball.x, ball.y, 1.2)
-        return
-      }
-
-      if (ball.player) {
+      } else if (ball.player) {
         ball.control = 'wasd'
-        ball.shieldUses = SHIELD_USES_PER_ROUND
+        ball.shieldUses = 0
         ball.bombUses = 0
-        ball.x = cx - arenaR * 0.25
       } else {
         ball.control = 'arrows'
         ball.shieldUses = 0
         ball.bombUses = 0
-        ball.x = cx + arenaR * 0.25
       }
-      ball.y = cy
+
+      const spawn = randomArenaSpawn()
+      ball.x = spawn.x
+      ball.y = spawn.y
       keepInArena(ball)
       spawnBurst(ball.x, ball.y, 1.2)
     }
@@ -3072,7 +3080,7 @@ function FightingBalls() {
       red.bossRespawnsLeft = BOSS_RESPAWNS
       red.control = 'wasd'
       red.player = true
-      red.shieldUses = SHIELD_USES_PER_ROUND
+      red.shieldUses = 0
       red.bombUses = 0
       red.eliminated = false
 
@@ -3399,6 +3407,9 @@ function FightingBalls() {
         if (w === 'hammer') {
           if (side === 'red') inventory.weaponRed = inventory.startWeaponRed || 'bow'
           else inventory.weaponBlue = inventory.startWeaponBlue || 'bow'
+        }
+        for (let i = walls.length - 1; i >= 0; i -= 1) {
+          if (walls[i].owner === side) walls.splice(i, 1)
         }
       }
       killstreakMessage = `${side === 'red' ? 'Röd' : 'Blå'} förlorade ${prev} (poäng ${SCORE_REWARD_LOSE_AT})`
@@ -4020,21 +4031,164 @@ function FightingBalls() {
           ? fighters.find((f) => (f.player || f.control === 'wasd') && !f.eliminated)
           : fighters.find((f) => f.control === 'arrows' && !f.eliminated)
       if (!owner) return false
+      const target =
+        side === 'red'
+          ? fighters.find((f) => f.control === 'arrows' && !f.eliminated && f.lives > 0)
+          : fighters.find((f) => (f.player || f.control === 'wasd') && !f.eliminated && f.lives > 0)
+      if (!target && !bossMode) return false
+      const aim =
+        target ||
+        fighters.find((f) => f.isBoss && !f.eliminated && f.lives > 0) ||
+        { x: cx, y: cy }
+
       if (side === 'red') inventory.nukeUsedRed = true
       else inventory.nukeUsedBlue = true
       if (side === 'red') inventory.scoreRewardRed = null
       else inventory.scoreRewardBlue = null
+
+      // Missil kommer in från höger sida mot motståndaren
+      const startX = width + NUKE_RADIUS * 3
+      const startY = aim.y + (Math.random() - 0.5) * 40
+      nukes.push({
+        x: startX,
+        y: startY,
+        tx: aim.x,
+        ty: aim.y,
+        r: NUKE_RADIUS,
+        side,
+        owner,
+        target,
+        trail: [],
+      })
+      killstreakMessage = `${side === 'red' ? 'Röd' : 'Blå'} NUKE på väg!`
+      killstreakMessageUntil = performance.now() + 2200
+      shake = Math.min(10, shake + 4)
+      return true
+    }
+
+    function detonateNuke(n) {
+      const hitX = n.target && !n.target.eliminated ? n.target.x : n.x
+      const hitY = n.target && !n.target.eliminated ? n.target.y : n.y
+      nukeFlash = 1
       flash = 1
-      shake = 22
-      spawnBurst(cx, cy, 4)
+      shake = 28
+      spawnBurst(hitX, hitY, 5)
+      // Extra kall ånga
+      for (let i = 0; i < 40; i += 1) {
+        const ang = Math.random() * Math.PI * 2
+        const spd = 2 + Math.random() * 10
+        particles.push({
+          x: hitX,
+          y: hitY,
+          vx: Math.cos(ang) * spd,
+          vy: Math.sin(ang) * spd - 1,
+          life: 1,
+          decay: 0.018 + Math.random() * 0.02,
+          size: 6 + Math.random() * 14,
+          color:
+            Math.random() > 0.45
+              ? [180, 230, 255]
+              : Math.random() > 0.5
+                ? [255, 255, 255]
+                : [120, 200, 255],
+          fire: false,
+        })
+      }
       for (let i = 0; i < fighters.length; i += 1) {
         const f = fighters[i]
-        if (f === owner || f.eliminated) continue
+        if (f === n.owner || f.eliminated) continue
         f.lives = 0
+        f.squash = 1
       }
-      killstreakMessage = `${side === 'red' ? 'Röd' : 'Blå'} NUKE!`
+      killstreakMessage = `${n.side === 'red' ? 'Röd' : 'Blå'} NUKE!`
       killstreakMessageUntil = performance.now() + 3000
-      return true
+    }
+
+    function updateNukes(dt) {
+      for (let i = nukes.length - 1; i >= 0; i -= 1) {
+        const n = nukes[i]
+        if (n.target && !n.target.eliminated) {
+          n.tx = n.target.x
+          n.ty = n.target.y
+        }
+        const dx = n.tx - n.x
+        const dy = n.ty - n.y
+        const dist = Math.hypot(dx, dy) || 1
+        n.x += (dx / dist) * NUKE_SPEED * dt
+        n.y += (dy / dist) * NUKE_SPEED * dt
+        n.trail.push({ x: n.x, y: n.y, life: 1 })
+        if (n.trail.length > 18) n.trail.shift()
+        for (let t = 0; t < n.trail.length; t += 1) n.trail[t].life *= 0.9
+
+        // Kall rökspår
+        if (Math.random() < 0.7) {
+          particles.push({
+            x: n.x - (dx / dist) * n.r,
+            y: n.y - (dy / dist) * n.r,
+            vx: (Math.random() - 0.5) * 1.5,
+            vy: -1 - Math.random() * 2,
+            life: 0.9,
+            decay: 0.04,
+            size: 4 + Math.random() * 8,
+            color: [200, 235, 255],
+            fire: false,
+          })
+        }
+
+        const hitR = (n.target ? getRadius(n.target) : ballR) + n.r
+        if (dist < hitR || n.x < -n.r * 2) {
+          detonateNuke(n)
+          nukes.splice(i, 1)
+        }
+      }
+      if (nukeFlash > 0) nukeFlash *= 0.9
+      if (nukeFlash < 0.02) nukeFlash = 0
+    }
+
+    function drawNukes() {
+      for (let i = 0; i < nukes.length; i += 1) {
+        const n = nukes[i]
+        // Spår
+        for (let t = 0; t < n.trail.length; t += 1) {
+          const p = n.trail[t]
+          const a = Math.max(0, p.life) * 0.45
+          ctx.fillStyle = `rgba(160, 220, 255, ${a})`
+          ctx.beginPath()
+          ctx.arc(p.x, p.y, n.r * (0.35 + p.life * 0.4), 0, Math.PI * 2)
+          ctx.fill()
+        }
+        ctx.save()
+        ctx.translate(n.x, n.y)
+        const ang = Math.atan2(n.ty - n.y, n.tx - n.x)
+        ctx.rotate(ang)
+        // Glow
+        const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, n.r * 2.4)
+        glow.addColorStop(0, 'rgba(255,255,255,0.85)')
+        glow.addColorStop(0.35, 'rgba(140,210,255,0.55)')
+        glow.addColorStop(1, 'rgba(40,120,200,0)')
+        ctx.fillStyle = glow
+        ctx.beginPath()
+        ctx.arc(0, 0, n.r * 2.4, 0, Math.PI * 2)
+        ctx.fill()
+        // Kropp
+        ctx.fillStyle = '#e2e8f0'
+        ctx.strokeStyle = '#38bdf8'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.moveTo(n.r * 1.2, 0)
+        ctx.lineTo(-n.r * 0.9, -n.r * 0.55)
+        ctx.lineTo(-n.r * 0.55, 0)
+        ctx.lineTo(-n.r * 0.9, n.r * 0.55)
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = '#0ea5e9'
+        ctx.font = 'bold 11px Syne, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText('NUKE', -n.r * 0.15, 0)
+        ctx.restore()
+      }
     }
 
     function placeWall(fighter) {
@@ -4042,20 +4196,23 @@ function FightingBalls() {
       const side = isRedSide(fighter) ? 'red' : 'blue'
       const reward = side === 'red' ? inventory.scoreRewardRed : inventory.scoreRewardBlue
       if (reward !== 'hammer') return false
+      const owned = walls.filter((w) => w.owner === side).length
+      if (owned >= WALL_MAX) return false
       const ang =
         typeof fighter.knifeAngle === 'number'
           ? fighter.knifeAngle
           : (fighter.face || 1) > 0
             ? 0
             : Math.PI
-      const dist = getRadius(fighter) + WALL_LEN * 0.55
+      const wallLen = getRadius(fighter) * 2
+      const dist = getRadius(fighter) + wallLen * 0.55
       const mx = fighter.x + Math.cos(ang) * dist
       const my = fighter.y + Math.sin(ang) * dist
       walls.push({
         x: mx,
         y: my,
         ang,
-        w: WALL_LEN,
+        w: wallLen,
         h: WALL_THICK,
         owner: side,
       })
@@ -5979,6 +6136,8 @@ function FightingBalls() {
       petSelectSide = null
       pendingPetSelect = null
       pets.length = 0
+      nukes.length = 0
+      nukeFlash = 0
       eventPistolActive = false
       eventPistolGranted = false
       walls.length = 0
@@ -6034,7 +6193,7 @@ function FightingBalls() {
                         : redW === 'foot'
                           ? 'Fot · Q'
                           : redW === 'hammer'
-                            ? 'Hammare · Q · G väg'
+                            ? `Hammare · Q · G väg (${WALL_MAX})`
                             : ''
       if (redLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
@@ -6044,9 +6203,9 @@ function FightingBalls() {
       }
       if (inventory.scoreRewardRed === 'nuke' && !inventory.nukeUsedRed) {
         ctx.font = '600 12px Figtree, sans-serif'
-        ctx.fillStyle = '#ef4444'
-        ctx.strokeText('NUKE · T', 28, 142)
-        ctx.fillText('NUKE · T', 28, 142)
+        ctx.fillStyle = '#38bdf8'
+        ctx.strokeText('NUKE · E', 28, 142)
+        ctx.fillText('NUKE · E', 28, 142)
       }
       if (inventory.petRed) {
         const petY = inventory.scoreRewardRed === 'nuke' && !inventory.nukeUsedRed ? 160 : 142
@@ -6091,7 +6250,7 @@ function FightingBalls() {
                         : blueW === 'ping'
                           ? 'Pingis · 1'
                           : blueW === 'hammer'
-                            ? 'Hammare · 1 · 8 väg'
+                            ? `Hammare · 1 · 8 väg (${WALL_MAX})`
                             : ''
       if (blueLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
@@ -6951,28 +7110,6 @@ function FightingBalls() {
           }
         }
 
-        // Remaining shield uses (cyan) under life pips for red
-        if (ball.player) {
-          const uses = Math.max(0, ball.shieldUses || 0)
-          const sGap = pipR * 2.6
-          const sTotal = (SHIELD_USES_PER_ROUND - 1) * sGap
-          const sStart = ball.x - sTotal / 2
-          const sY = pipY - pipR * 3
-          for (let i = 0; i < SHIELD_USES_PER_ROUND; i += 1) {
-            ctx.beginPath()
-            ctx.arc(sStart + i * sGap, sY, pipR * 0.9, 0, Math.PI * 2)
-            if (i < uses) {
-              ctx.fillStyle = '#7ad7ff'
-              ctx.fill()
-            } else {
-              ctx.strokeStyle = 'rgba(122, 215, 255, 0.3)'
-              ctx.lineWidth = 1.5
-              ctx.stroke()
-            }
-          }
-
-        }
-
         // Bomber borttagna från blå
       }
     }
@@ -7053,6 +7190,7 @@ function FightingBalls() {
           for (let i = 0; i < pets.length; i += 1) {
             drawPet(pets[i])
           }
+          drawNukes()
           drawScores()
           drawShopButton()
           drawGoldCoins()
@@ -7084,6 +7222,7 @@ function FightingBalls() {
         updateArrows(dt)
         updateBodyguards(dt, now)
         updatePets(dt, now)
+        updateNukes(dt)
         updateFarts(dt, now)
         updateBurns(dt, now)
         updatePolice(dt)
@@ -7205,6 +7344,8 @@ function FightingBalls() {
           drawPet(pets[i])
         }
 
+        drawNukes()
+
         ctx.restore()
 
         // HUD
@@ -7222,7 +7363,12 @@ function FightingBalls() {
         drawScoreWheel()
         drawPetSelect()
 
-        if (flash > 0.02) {
+        if (nukeFlash > 0.02) {
+          ctx.fillStyle = `rgba(180, 230, 255, ${nukeFlash * 0.55})`
+          ctx.fillRect(0, 0, width, height)
+          ctx.fillStyle = `rgba(255, 255, 255, ${nukeFlash * 0.35})`
+          ctx.fillRect(0, 0, width, height)
+        } else if (flash > 0.02) {
           ctx.fillStyle = `rgba(255,250,230,${flash * 0.35})`
           ctx.fillRect(0, 0, width, height)
         }
@@ -7416,18 +7562,7 @@ function FightingBalls() {
       }
       if (k === 'e' && !e.repeat) {
         e.preventDefault()
-        const player = fighters.find((f) => f.player)
-        if (
-          player &&
-          !player.eliminated &&
-          player.lives > 0 &&
-          player.shieldUses > 0 &&
-          !isShielded(player)
-        ) {
-          player.shieldUntil = performance.now() + SHIELD_DURATION
-          player.shieldKind = 'basic'
-          player.shieldUses -= 1
-        }
+        useNuke('red')
         return
       }
       if (k === 'f' && !e.repeat) {
