@@ -99,6 +99,8 @@ const GRON_BOSS_CODE = 'grön boss'
 const MJOLK_CODE = 'mjölk'
 const RED_COINS_CODE = '000'
 const RED_COINS_CODE_REWARD = 500
+const COINS_1000_CODE = '1000'
+const COINS_1000_REWARD = 1000
 const RPG_DAMAGE = 5 // Lv5=5, Lv6=6, Lv7=7, Lv8=8
 const RPG_FIRE_DAMAGE = 1 // eld per sekund
 const RPG_FIRE_TICK_MS = 1000
@@ -177,6 +179,9 @@ const WIN_COIN_REWARD = 999
 const SECRET_CODE = '6655'
 const SECRET_CODE_REWARD = 30
 const SECRET_CODE_MAX_USES = 3
+const HJUL_CODE = 'hjul'
+const IS_CODE = 'is'
+const SCORE_WHEEL_NUKE_CHANCE = 0.7
 const BOSS_HP = 500
 const BOSS_DAMAGE = 3
 const BOSS_TOUCH_DAMAGE = 2
@@ -209,20 +214,32 @@ const WALL_MAX = 3
 const WALL_THICK = 18
 const NUKE_SPEED = 14
 const NUKE_RADIUS = 22
+const PLAYER_MAX_SPEED = 7.5 * 0.75 // 25% långsammare
+const PLAYER_ACCEL = 0.52 * 0.75
+const TELEPORT_DIST = 190
+const TELEPORT_COOLDOWN = 1200
 const SCORE_WHEEL_SEGMENTS = [
   { id: 'nuke', label: 'NUKE', rarity: 'jackpot', color: '#ef4444' },
   { id: 'hammer', label: 'Hammare', rarity: 'better', color: '#a16207' },
 ]
 const PET_SELECT_AT = 15
-const PET_LOSE_AT = 20
-const PET_RADIUS = 14
+const PET_LOSE_AT = 25
+const PET_RADIUS = 42 // tripelt så stora (var 14)
 const PET_FOLLOW_SPEED = 9
-const PET_ABILITY_COOLDOWN = 6000
 const CAT_LATCH_DAMAGE = 2
 const CAT_LATCH_TICK_MS = 1000
 const CAT_LATCH_DURATION_MS = 4000
 const DOG_BITE_DAMAGE = 4
-const DOG_LUNGE_SPEED = 16
+const DOG_LUNGE_SPEED = 18
+const CAT_POUNCE_SPEED = 20
+const PEN_WORLD_AT = 30
+const PEN_FIRE_DAMAGE = 3
+const PEN_ICE_DAMAGE = 3
+const PEN_COOLDOWN = 420
+const PEN_SPEED = 13
+const PEN_FIRE_RADIUS = 26
+const PEN_ICE_LEN = 56
+const PEN_ICE_WIDTH = 16
 
 const PALETTE = [
   { color: '#ff4d3a', glow: '#ff8a70' },
@@ -267,11 +284,20 @@ function FightingBalls() {
     const poisonPools = []
     const walls = []
     const nukes = []
+    const penBolts = []
     let nukeFlash = 0 // kall blåvit flash vid träff
     let leonCallsRed = 0
     let leonCallsBlue = 0
     let eventPistolActive = false
     let eventPistolGranted = false
+    let penWorldActive = false
+    let penWorldTriggered = false
+    let pendingPenWorld = false
+    let penSelectOpen = false
+    let penSelectPausedAt = 0
+    const penSelectHits = []
+    let pickPenRed = null // 'fire' | 'ice'
+    let pickPenBlue = null
     let scoreWheelOpen = false
     let scoreWheelSide = null
     const scoreWheelHits = []
@@ -397,6 +423,8 @@ function FightingBalls() {
       petBlue: null,
       petSelectDoneRed: false,
       petSelectDoneBlue: false,
+      penRed: null, // 'fire' | 'ice' | null
+      penBlue: null,
     }
 
     const fighters = []
@@ -458,6 +486,7 @@ function FightingBalls() {
         kidnapped: false,
         kidnapUntil: 0,
         flaskReadyAt: 0,
+        teleportReadyAt: 0,
       }
     }
 
@@ -826,7 +855,7 @@ function FightingBalls() {
         return
       }
 
-      const accel = 0.52 * dt
+      const accel = PLAYER_ACCEL * dt
       let steered = false
 
       if (ball.control === 'wasd') {
@@ -856,7 +885,7 @@ function FightingBalls() {
         }
 
         const speed = Math.hypot(ball.vx, ball.vy)
-        const max = 7.5
+        const max = PLAYER_MAX_SPEED
         if (speed > max) {
           ball.vx = (ball.vx / speed) * max
           ball.vy = (ball.vy / speed) * max
@@ -1157,6 +1186,11 @@ function FightingBalls() {
 
     function getSideWeapon(attacker) {
       if (!attacker) return 'bow'
+      if (penWorldActive) {
+        const side = isRedSide(attacker) ? 'red' : 'blue'
+        const pen = side === 'red' ? inventory.penRed : inventory.penBlue
+        return pen === 'ice' ? 'penIce' : 'penFire'
+      }
       if (eventPistolActive) return 'pistol'
       const side = isRedSide(attacker) ? 'red' : 'blue'
       const reward = side === 'red' ? inventory.scoreRewardRed : inventory.scoreRewardBlue
@@ -2667,7 +2701,9 @@ function FightingBalls() {
         kind !== 'rpg' &&
         kind !== 'sniper' &&
         kind !== 'ping' &&
-        kind !== 'hammer'
+        kind !== 'hammer' &&
+        kind !== 'penFire' &&
+        kind !== 'penIce'
       ) {
         kind = 'limb'
       } else if (kind === 'ping') {
@@ -2684,6 +2720,9 @@ function FightingBalls() {
         return
       } else if (kind === 'bow' || kind === 'nokia') {
         shootBow(attacker)
+        return
+      } else if (kind === 'penFire' || kind === 'penIce') {
+        shootPen(attacker, kind === 'penIce' ? 'ice' : 'fire')
         return
       } else if (kind === 'hammer') {
         // fall through to melee swing
@@ -3270,6 +3309,7 @@ function FightingBalls() {
         if (f.knifeReadyAt > 0) f.knifeReadyAt += ms
         if (f.knifeSwingUntil > 0) f.knifeSwingUntil += ms
         if (f.flaskReadyAt > 0) f.flaskReadyAt += ms
+        if (f.teleportReadyAt > 0) f.teleportReadyAt += ms
       }
       for (let i = 0; i < bombs.length; i += 1) {
         if (bombs[i].fuseUntil > 0) bombs[i].fuseUntil += ms
@@ -3314,7 +3354,7 @@ function FightingBalls() {
     }
 
     function handleScoreMilestone(side, score, now) {
-      if (bossMode) return
+      if (bossMode || penWorldActive) return
 
       // Poäng 5: alla får homing-pistol (ingen CD, 2 dmg)
       if (score >= EVENT_PISTOL_AT && !eventPistolGranted) {
@@ -3367,12 +3407,30 @@ function FightingBalls() {
 
       const atShop = isShopMilestone(score)
       const atBoss = score >= BOSS_SCORE && !bossTriggeredThisMatch
+      const atPenWorld = score >= PEN_WORLD_AT && !penWorldTriggered
       const atWin = score >= WIN_SCORE
 
       if (atWin) {
         shopFree = true
         if (side === 'red') redCoins += WIN_COIN_REWARD
         else blueCoins += WIN_COIN_REWARD
+      }
+
+      // Poäng 30: ny pennvärld (svart · eld/is · ingen shop/codes)
+      if (atPenWorld) {
+        penWorldTriggered = true
+        if (atShop) {
+          pendingPenWorld = true
+          if (atBoss) {
+            bossTriggeredThisMatch = true
+            pendingBossAfterShop = true
+          }
+          if (atWin) pendingWinAfterShop = side
+          openShop()
+          return
+        }
+        startPenWorld()
+        return
       }
 
       if (atShop) {
@@ -3435,10 +3493,25 @@ function FightingBalls() {
       scoreWheelSide = null
       swPending = null
       swNeedSpin = false
+      if (pendingScoreWheel) {
+        const side = pendingScoreWheel
+        pendingScoreWheel = null
+        openScoreWheel(side)
+        return
+      }
       if (pendingPetSelect) {
         const side = pendingPetSelect
         pendingPetSelect = null
         openPetSelect(side)
+        return
+      }
+      if (pendingPenWorld && !penWorldActive && !winner) {
+        pendingPenWorld = false
+        if (shopPausedAt > 0 && !shopOpen && !killstreakOpen && !petSelectOpen) {
+          shiftPausedTimers(performance.now() - shopPausedAt)
+          shopPausedAt = 0
+        }
+        startPenWorld()
         return
       }
       if (pendingBossAfterShop && !bossMode && !winner) {
@@ -3515,6 +3588,15 @@ function FightingBalls() {
       petSelectOpen = false
       petSelectSide = null
       if (nextPendingPetSelect()) return
+      if (pendingPenWorld && !penWorldActive && !winner) {
+        pendingPenWorld = false
+        if (shopPausedAt > 0 && !shopOpen && !killstreakOpen && !scoreWheelOpen) {
+          shiftPausedTimers(performance.now() - shopPausedAt)
+          shopPausedAt = 0
+        }
+        startPenWorld()
+        return
+      }
       if (pendingBossAfterShop && !bossMode && !winner) {
         pendingBossAfterShop = false
         if (shopPausedAt > 0 && !shopOpen && !killstreakOpen && !scoreWheelOpen) {
@@ -3566,21 +3648,39 @@ function FightingBalls() {
     }
 
     function usePetAbility(side) {
-      const pet = pets.find((p) => p.side === side)
-      if (!pet || !pet.owner || pet.owner.eliminated || pet.owner.lives <= 0) return
-      const now = performance.now()
-      if (now < (pet.readyAt || 0)) return
-      if (pet.mode !== 'follow') return
+      const kind = side === 'red' ? inventory.petRed : inventory.petBlue
+      if (!kind) return
+      const owner = getOwnerForSide(side)
+      if (!owner || owner.eliminated || owner.lives <= 0) return
+      let pet = pets.find((p) => p.side === side)
+      if (!pet) {
+        spawnPet(side, kind)
+        pet = pets.find((p) => p.side === side)
+      }
+      if (!pet) return
+      pet.owner = owner
+      pet.kind = kind
+      pet.r = PET_RADIUS
       const enemy = getEnemyForSide(side)
       if (!enemy || enemy.eliminated || enemy.lives <= 0) return
-      pet.readyAt = now + PET_ABILITY_COOLDOWN
-      if (pet.kind === 'cat') {
-        pet.mode = 'pounce'
-        pet.latchTarget = enemy
-      } else {
-        pet.mode = 'lunge'
-        pet.latchTarget = enemy
-      }
+      // Obegränsat antal gånger · ingen cooldown
+      pet.readyAt = 0
+      pet.latchUntil = 0
+      pet.latchTarget = enemy
+      // Starta från ägaren och spring rakt mot motståndaren
+      pet.x = owner.x
+      pet.y = owner.y
+      const dx = enemy.x - owner.x
+      const dy = enemy.y - owner.y
+      const dist = Math.hypot(dx, dy) || 1
+      const charge = kind === 'cat' ? CAT_POUNCE_SPEED : DOG_LUNGE_SPEED
+      pet.vx = (dx / dist) * charge
+      pet.vy = (dy / dist) * charge
+      pet.face = pet.vx >= 0 ? 1 : -1
+      pet.squash = 0.45
+      spawnBurst(owner.x, owner.y, 0.8)
+      if (kind === 'cat') pet.mode = 'pounce'
+      else pet.mode = 'lunge'
     }
 
     function updatePets(dt, now) {
@@ -3588,8 +3688,14 @@ function FightingBalls() {
         const p = pets[i]
         const owner = getOwnerForSide(p.side)
         p.owner = owner
-        if (!owner || owner.eliminated) {
+        if (!owner) {
           pets.splice(i, 1)
+          continue
+        }
+        // Behåll djuret medan ägaren är död · vänta tills revive
+        if (owner.eliminated) {
+          p.vx = 0
+          p.vy = 0
           continue
         }
         p.squash *= 0.88
@@ -3620,9 +3726,9 @@ function FightingBalls() {
           } else {
             tx = t.x
             ty = t.y
-            speed = p.mode === 'lunge' ? DOG_LUNGE_SPEED : 14
+            speed = p.mode === 'lunge' ? DOG_LUNGE_SPEED : CAT_POUNCE_SPEED
             const near = Math.hypot(t.x - p.x, t.y - p.y)
-            if (near < getRadius(t) + p.r + 6) {
+            if (near < getRadius(t) + p.r + 8) {
               if (p.kind === 'cat' && p.mode === 'pounce') {
                 p.mode = 'latch'
                 p.latchUntil = now + CAT_LATCH_DURATION_MS
@@ -3633,7 +3739,7 @@ function FightingBalls() {
                 })
                 t.burnNextTick = now // första tick direkt · 2/s i 4s
                 t.squash = 0.45
-                spawnBurst(t.x, t.y, 0.9)
+                spawnBurst(t.x, t.y, 1.1)
                 shake = Math.min(14, shake + 4)
               } else if (p.kind === 'dog' && p.mode === 'lunge') {
                 if (!isShielded(t, now)) {
@@ -3644,7 +3750,7 @@ function FightingBalls() {
                 t.vx += Math.cos(ang) * 10
                 t.vy += Math.sin(ang) * 10
                 t.squash = 0.55
-                spawnBurst(t.x, t.y, 1)
+                spawnBurst(t.x, t.y, 1.2)
                 shake = Math.min(16, shake + 6)
                 p.mode = 'follow'
                 p.latchTarget = null
@@ -3652,6 +3758,24 @@ function FightingBalls() {
               }
               continue
             }
+            // Spring rakt mot fienden
+            const adx = tx - p.x
+            const ady = ty - p.y
+            const adist = Math.hypot(adx, ady) || 1
+            p.vx = (adx / adist) * speed
+            p.vy = (ady / adist) * speed
+            p.x += p.vx * dt
+            p.y += p.vy * dt
+            p.face = p.vx >= 0 ? 1 : -1
+            const rdx = p.x - cx
+            const rdy = p.y - cy
+            const rdist = Math.hypot(rdx, rdy)
+            const limit = arenaR - p.r
+            if (rdist > limit) {
+              p.x = cx + (rdx / rdist) * limit
+              p.y = cy + (rdy / rdist) * limit
+            }
+            continue
           }
         }
 
@@ -3841,7 +3965,7 @@ function FightingBalls() {
       ctx.fillStyle = 'rgba(255,255,255,0.45)'
       ctx.font = '12px Figtree, sans-serif'
       ctx.fillText(
-        `Djur ${PET_SELECT_AT}–${PET_LOSE_AT} poäng · ${isRed ? 'C' : '4'} = attack`,
+        `Djur ${PET_SELECT_AT}–${PET_LOSE_AT} poäng · ${isRed ? 'C' : '4'} = attack (obegränsat)`,
         width * 0.5,
         py + panelH - 28,
       )
@@ -3851,7 +3975,16 @@ function FightingBalls() {
     function startScoreWheelSpin() {
       if (!scoreWheelOpen || !scoreWheelSide || swSpinning) return
       const n = SCORE_WHEEL_SEGMENTS.length
-      const idx = Math.floor(Math.random() * n)
+      const nukeIdx = SCORE_WHEEL_SEGMENTS.findIndex((s) => s.id === 'nuke')
+      const hammerIdx = SCORE_WHEEL_SEGMENTS.findIndex((s) => s.id === 'hammer')
+      const idx =
+        Math.random() < SCORE_WHEEL_NUKE_CHANCE
+          ? nukeIdx >= 0
+            ? nukeIdx
+            : 0
+          : hammerIdx >= 0
+            ? hammerIdx
+            : Math.floor(Math.random() * n)
       const prize = SCORE_WHEEL_SEGMENTS[idx]
       const slice = (Math.PI * 2) / n
       const segmentCenter = idx * slice + slice * 0.5
@@ -4613,7 +4746,7 @@ function FightingBalls() {
     }
 
     function openShop() {
-      if (shopOpen || codesOpen || weaponSelectOpen || winner || bossMode) return
+      if (shopOpen || codesOpen || weaponSelectOpen || winner || bossMode || penWorldActive) return
       clearKeys()
       shopPausedAt = performance.now()
       shopOpen = true
@@ -4631,8 +4764,10 @@ function FightingBalls() {
 
       const winSide = pendingWinAfterShop
       const startBoss = pendingBossAfterShop
+      const startPen = pendingPenWorld
       pendingWinAfterShop = null
       pendingBossAfterShop = false
+      pendingPenWorld = false
 
       if (winSide) {
         winner = winSide
@@ -4643,6 +4778,7 @@ function FightingBalls() {
         const side = pendingScoreWheel
         pendingScoreWheel = null
         if (startBoss) pendingBossAfterShop = true
+        if (startPen) pendingPenWorld = true
         openScoreWheel(side)
         return
       }
@@ -4650,7 +4786,12 @@ function FightingBalls() {
         const side = pendingPetSelect
         pendingPetSelect = null
         if (startBoss) pendingBossAfterShop = true
+        if (startPen) pendingPenWorld = true
         openPetSelect(side)
+        return
+      }
+      if (startPen && !penWorldActive && !winner) {
+        startPenWorld()
         return
       }
       if (startBoss && !bossMode && !winner) {
@@ -4658,7 +4799,362 @@ function FightingBalls() {
       }
     }
 
+    function startPenWorld() {
+      penWorldActive = true
+      pendingPenWorld = false
+      // Rensa shop/codes-grejer · bara penna i den här världen
+      shopOpen = false
+      codesOpen = false
+      walls.length = 0
+      inventory.scoreRewardRed = null
+      inventory.scoreRewardBlue = null
+      inventory.weaponRed = null
+      inventory.weaponBlue = null
+      inventory.penRed = null
+      inventory.penBlue = null
+      pickPenRed = null
+      pickPenBlue = null
+      penBolts.length = 0
+      clearKeys()
+      if (!shopPausedAt) shopPausedAt = performance.now()
+      penSelectPausedAt = performance.now()
+      penSelectOpen = true
+      killstreakMessage = `Undervärlden! Välj Eld eller Is`
+      killstreakMessageUntil = performance.now() + 3200
+      spawnBurst(cx, cy, 2)
+      flash = Math.min(0.8, flash + 0.4)
+    }
+
+    function applyPenPick(side, element) {
+      if (element !== 'fire' && element !== 'ice') return
+      if (side === 'red') {
+        pickPenRed = element
+        inventory.penRed = element
+      } else {
+        pickPenBlue = element
+        inventory.penBlue = element
+      }
+    }
+
+    function confirmPenSelect() {
+      if (!penSelectOpen) return
+      if (!pickPenRed) applyPenPick('red', 'fire')
+      if (!pickPenBlue) applyPenPick('blue', 'fire')
+      penSelectOpen = false
+      if (penSelectPausedAt > 0) {
+        shiftPausedTimers(performance.now() - penSelectPausedAt)
+        penSelectPausedAt = 0
+      }
+      if (shopPausedAt > 0 && !shopOpen && !weaponSelectOpen) {
+        shiftPausedTimers(performance.now() - shopPausedAt)
+        shopPausedAt = 0
+      }
+      killstreakMessage = `Undervärlden · Röd ${inventory.penRed === 'ice' ? 'Is' : 'Eld'} · Blå ${inventory.penBlue === 'ice' ? 'Is' : 'Eld'}`
+      killstreakMessageUntil = performance.now() + 2800
+    }
+
+    function drawPenSelect() {
+      penSelectHits.length = 0
+      if (!penSelectOpen) return
+      ctx.save()
+      ctx.fillStyle = 'rgba(0,0,0,0.88)'
+      ctx.fillRect(0, 0, width, height)
+      ctx.fillStyle = '#e2e8f0'
+      ctx.font = 'bold 40px Syne, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('UNDERVÄRLDEN', width * 0.5, height * 0.1)
+      ctx.fillStyle = 'rgba(255,255,255,0.65)'
+      ctx.font = '600 15px Figtree, sans-serif'
+      ctx.fillText('Välj Eld eller Is · Enter / Starta', width * 0.5, height * 0.155)
+
+      const cardW = Math.min(300, width * 0.42)
+      const cardH = Math.min(340, height * 0.56)
+      const gap = Math.min(40, width * 0.05)
+      const leftX = width * 0.5 - cardW - gap * 0.5
+      const rightX = width * 0.5 + gap * 0.5
+      const cardY = height * 0.5 - cardH * 0.48
+
+      function drawPenCard(x, y, w, h, side, picked) {
+        const isRed = side === 'red'
+        ctx.fillStyle = '#0b0f14'
+        ctx.strokeStyle = isRed ? '#ff6b5a' : '#5ec8ff'
+        ctx.lineWidth = 3
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, 16)
+        else ctx.rect(x, y, w, h)
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = isRed ? '#ff6b5a' : '#5ec8ff'
+        ctx.font = 'bold 26px Syne, sans-serif'
+        ctx.fillText(isRed ? 'RÖD' : 'BLÅ', x + w * 0.5, y + 34)
+        ctx.fillStyle = 'rgba(255,255,255,0.5)'
+        ctx.font = '13px Figtree, sans-serif'
+        ctx.fillText(isRed ? 'Q = eld · E = is' : '1 = eld · 2 = is', x + w * 0.5, y + 58)
+
+        const btnW = w - 40
+        const btnH = 64
+        const options = [
+          {
+            id: `${side}-fire`,
+            element: 'fire',
+            label: 'Eld',
+            sub: 'Skjuter eldbollar',
+            by: y + 90,
+            color: '#f97316',
+          },
+          {
+            id: `${side}-ice`,
+            element: 'ice',
+            label: 'Is',
+            sub: 'Vassa isbitar',
+            by: y + 170,
+            color: '#38bdf8',
+          },
+        ]
+        options.forEach((opt) => {
+          const bx = x + 20
+          const chosen = picked === opt.element
+          ctx.fillStyle = chosen ? opt.color : '#1a2030'
+          ctx.strokeStyle = chosen ? '#ffe9a0' : 'rgba(255,255,255,0.2)'
+          ctx.lineWidth = chosen ? 3 : 1.5
+          ctx.beginPath()
+          if (typeof ctx.roundRect === 'function') ctx.roundRect(bx, opt.by, btnW, btnH, 12)
+          else ctx.rect(bx, opt.by, btnW, btnH)
+          ctx.fill()
+          ctx.stroke()
+          ctx.fillStyle = '#ffffff'
+          ctx.font = 'bold 22px Figtree, sans-serif'
+          ctx.fillText(opt.label, x + w * 0.5, opt.by + 24)
+          ctx.fillStyle = 'rgba(255,255,255,0.7)'
+          ctx.font = '13px Figtree, sans-serif'
+          ctx.fillText(opt.sub, x + w * 0.5, opt.by + 46)
+          penSelectHits.push({ x: bx, y: opt.by, w: btnW, h: btnH, id: opt.id })
+        })
+        ctx.fillStyle = picked ? '#86efac' : 'rgba(255,255,255,0.45)'
+        ctx.font = 'bold 15px Figtree, sans-serif'
+        ctx.fillText(
+          picked ? `Valt: ${picked === 'ice' ? 'Is' : 'Eld'}` : 'Välj element',
+          x + w * 0.5,
+          y + h - 24,
+        )
+      }
+
+      drawPenCard(leftX, cardY, cardW, cardH, 'red', pickPenRed)
+      drawPenCard(rightX, cardY, cardW, cardH, 'blue', pickPenBlue)
+
+      const startW = Math.min(280, width * 0.5)
+      const startH = 54
+      const startX = width * 0.5 - startW * 0.5
+      const startY = Math.min(height - 70, cardY + cardH + 24)
+      const ready = !!(pickPenRed || pickPenBlue)
+      ctx.fillStyle = ready ? '#38bdf8' : '#4b5563'
+      ctx.strokeStyle = ready ? '#e0f2fe' : '#6b7280'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(startX, startY, startW, startH, 12)
+      else ctx.rect(startX, startY, startW, startH)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = ready ? '#0b1220' : '#d1d5db'
+      ctx.font = 'bold 22px Syne, sans-serif'
+      ctx.fillText(ready ? 'STARTA' : 'Välj minst ett', width * 0.5, startY + startH * 0.5)
+      if (ready) {
+        penSelectHits.push({ x: startX, y: startY, w: startW, h: startH, id: 'start' })
+      }
+      ctx.restore()
+    }
+
+    function shootPen(attacker, element) {
+      if (!attacker || attacker.eliminated || attacker.lives <= 0) return
+      if (attacker.control !== 'arrows' && attacker.control !== 'wasd') return
+      const now = performance.now()
+      if (now < (attacker.knifeReadyAt || 0)) return
+      const angle = aimAtOpponent(attacker)
+      const nx = Math.cos(angle)
+      const ny = Math.sin(angle)
+      const isIce = element === 'ice'
+      const dmg = isIce ? PEN_ICE_DAMAGE : PEN_FIRE_DAMAGE
+      attacker.knifeReadyAt = now + PEN_COOLDOWN
+      attacker.knifeEquipped = true
+      attacker.knifeSwingUntil = now + 200
+      attacker.meleeKind = isIce ? 'penIce' : 'penFire'
+      attacker.knifeAngle = angle
+      attacker.squash = 0.28
+      attacker.face = nx >= 0 ? 1 : -1
+      const r = isIce ? PEN_ICE_WIDTH : PEN_FIRE_RADIUS
+      penBolts.push({
+        x: attacker.x + nx * (getRadius(attacker) + r + 6),
+        y: attacker.y + ny * (getRadius(attacker) + r + 6),
+        vx: nx * PEN_SPEED + attacker.vx * 0.15,
+        vy: ny * PEN_SPEED + attacker.vy * 0.15,
+        r,
+        angle,
+        life: 2.6,
+        owner: attacker,
+        damage: dmg,
+        element: isIce ? 'ice' : 'fire',
+      })
+      spawnBurst(attacker.x + nx * getRadius(attacker), attacker.y + ny * getRadius(attacker), 0.45)
+    }
+
+    function updatePenBolts(dt) {
+      for (let i = penBolts.length - 1; i >= 0; i -= 1) {
+        const b = penBolts[i]
+        const prevX = b.x
+        const prevY = b.y
+        b.x += b.vx * dt
+        b.y += b.vy * dt
+        b.life -= dt * 0.02
+        if (b.element === 'fire' && Math.random() < 0.85) {
+          particles.push({
+            x: b.x + (Math.random() - 0.5) * b.r,
+            y: b.y + (Math.random() - 0.5) * b.r,
+            vx: (Math.random() - 0.5) * 2.5,
+            vy: -2 - Math.random() * 3,
+            life: 0.9,
+            decay: 0.04,
+            size: 5 + Math.random() * 9,
+            color:
+              Math.random() > 0.6
+                ? [255, 220, 80]
+                : Math.random() > 0.5
+                  ? [255, 120, 30]
+                  : [255, 40, 10],
+            fire: true,
+          })
+        }
+        if (b.element === 'ice' && Math.random() < 0.7) {
+          particles.push({
+            x: b.x + (Math.random() - 0.5) * 10,
+            y: b.y + (Math.random() - 0.5) * 10,
+            vx: (Math.random() - 0.5) * 2,
+            vy: (Math.random() - 0.5) * 2 - 0.5,
+            life: 0.85,
+            decay: 0.035,
+            size: 3 + Math.random() * 6,
+            color:
+              Math.random() > 0.5 ? [220, 245, 255] : [120, 200, 255],
+            fire: false,
+          })
+        }
+        if (Math.hypot(b.x - cx, b.y - cy) > arenaR + 60 || b.life <= 0) {
+          penBolts.splice(i, 1)
+          continue
+        }
+        let hit = false
+        for (let j = 0; j < fighters.length; j += 1) {
+          const f = fighters[j]
+          if (f === b.owner || f.eliminated) continue
+          if (bossMode && !f.isBoss) continue
+          const prox = getRadius(f) + (b.element === 'ice' ? PEN_ICE_LEN * 0.35 : b.r) + PROJECTILE_HIT_PAD
+          const dNow = Math.hypot(f.x - b.x, f.y - b.y)
+          const dSweep = distPointToSegment(f.x, f.y, prevX, prevY, b.x, b.y)
+          if (dNow < prox || dSweep < prox) {
+            if (!isShielded(f)) {
+              f.lives -= b.damage
+              if (f.isBoss) addBossDamage(b.owner, b.damage)
+            }
+            f.squash = 0.5
+            f.vx += b.vx * 0.2
+            f.vy += b.vy * 0.2
+            if (b.element === 'fire') {
+              applyBurn(f, b.owner, performance.now(), {
+                damage: 1,
+                tickMs: 500,
+                durationMs: 1500,
+              })
+              nukeFlash = Math.max(nukeFlash, 0.35)
+            } else {
+              nukeFlash = Math.max(nukeFlash, 0.45)
+            }
+            spawnBurst(b.x, b.y, b.element === 'fire' ? 1.6 : 1.4)
+            shake = Math.min(16, shake + 6)
+            hit = true
+            break
+          }
+        }
+        if (hit) penBolts.splice(i, 1)
+      }
+    }
+
+    function drawPenBolts() {
+      for (let i = 0; i < penBolts.length; i += 1) {
+        const b = penBolts[i]
+        ctx.save()
+        ctx.translate(b.x, b.y)
+        ctx.rotate(b.angle)
+        if (b.element === 'fire') {
+          const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, b.r * 3.2)
+          glow.addColorStop(0, 'rgba(255,250,200,1)')
+          glow.addColorStop(0.25, 'rgba(255,160,40,0.85)')
+          glow.addColorStop(0.55, 'rgba(255,60,10,0.45)')
+          glow.addColorStop(1, 'rgba(255,20,0,0)')
+          ctx.fillStyle = glow
+          ctx.beginPath()
+          ctx.arc(0, 0, b.r * 3.2, 0, Math.PI * 2)
+          ctx.fill()
+          const core = ctx.createRadialGradient(-b.r * 0.2, -b.r * 0.2, 1, 0, 0, b.r)
+          core.addColorStop(0, '#fff7ed')
+          core.addColorStop(0.35, '#fdba74')
+          core.addColorStop(0.75, '#f97316')
+          core.addColorStop(1, '#c2410c')
+          ctx.fillStyle = core
+          ctx.beginPath()
+          ctx.arc(0, 0, b.r, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = 'rgba(255,255,255,0.85)'
+          ctx.beginPath()
+          ctx.arc(-b.r * 0.25, -b.r * 0.2, b.r * 0.35, 0, Math.PI * 2)
+          ctx.fill()
+        } else {
+          // Vass isbit som pennspets · dubbel storlek + kall glow
+          const len = PEN_ICE_LEN
+          const half = PEN_ICE_WIDTH * 0.5
+          const aura = ctx.createRadialGradient(0, 0, 2, 0, 0, len * 0.9)
+          aura.addColorStop(0, 'rgba(220,245,255,0.75)')
+          aura.addColorStop(0.45, 'rgba(100,200,255,0.35)')
+          aura.addColorStop(1, 'rgba(40,120,200,0)')
+          ctx.fillStyle = aura
+          ctx.beginPath()
+          ctx.arc(0, 0, len * 0.9, 0, Math.PI * 2)
+          ctx.fill()
+          const ice = ctx.createLinearGradient(-len * 0.4, 0, len * 0.55, 0)
+          ice.addColorStop(0, '#f0f9ff')
+          ice.addColorStop(0.35, '#bae6fd')
+          ice.addColorStop(0.7, '#38bdf8')
+          ice.addColorStop(1, '#0369a1')
+          ctx.fillStyle = ice
+          ctx.strokeStyle = '#ffffff'
+          ctx.lineWidth = 2.5
+          ctx.beginPath()
+          ctx.moveTo(len * 0.55, 0)
+          ctx.lineTo(-len * 0.35, -half)
+          ctx.lineTo(-len * 0.15, 0)
+          ctx.lineTo(-len * 0.35, half)
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+          ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.moveTo(len * 0.25, -2)
+          ctx.lineTo(-len * 0.1, -half * 0.4)
+          ctx.stroke()
+          ctx.fillStyle = 'rgba(255,255,255,0.55)'
+          ctx.beginPath()
+          ctx.moveTo(len * 0.35, 0)
+          ctx.lineTo(-len * 0.05, -half * 0.45)
+          ctx.lineTo(-len * 0.05, half * 0.15)
+          ctx.closePath()
+          ctx.fill()
+        }
+        ctx.restore()
+      }
+    }
+
     function drawShopButton() {
+      if (penWorldActive) return
       const w = 120
       const h = 42
       const gap = 12
@@ -4708,7 +5204,7 @@ function FightingBalls() {
     }
 
     function openCodes() {
-      if (codesOpen || shopOpen || weaponSelectOpen || winner || bossMode) return
+      if (codesOpen || shopOpen || weaponSelectOpen || winner || bossMode || penWorldActive) return
       clearKeys()
       shopPausedAt = performance.now()
       codesOpen = true
@@ -4960,6 +5456,16 @@ function FightingBalls() {
         triggerCheer()
         return
       }
+      if (typed === COINS_1000_CODE) {
+        redCoins += COINS_1000_REWARD
+        blueCoins += COINS_1000_REWARD
+        codesMessage = `+${COINS_1000_REWARD} kronor till båda!`
+        codesMessageUntil = performance.now() + 2500
+        codesInput = ''
+        spawnBurst(cx, cy, 1.8)
+        triggerCheer()
+        return
+      }
       if (typed === SECRET_CODE) {
         if (codeUsesLeft <= 0) {
           codesMessage = 'Koden är slut (0 kvar)'
@@ -5028,6 +5534,41 @@ function FightingBalls() {
         triggerCheer()
         flash = Math.min(0.7, flash + 0.35)
         shake = Math.min(14, shake + 6)
+        return
+      }
+      if (typed === HJUL_CODE) {
+        if (scoreWheelOpen || swSpinning) {
+          codesMessage = 'Hjulet är redan igång'
+          codesMessageUntil = performance.now() + 2000
+          codesInput = ''
+          return
+        }
+        closeCodes()
+        // Båda får 10-poängshjulet · 70% nuke (röd först, sen blå)
+        pendingScoreWheel = 'blue'
+        openScoreWheel('red')
+        killstreakMessage = `Hjul! Röd + Blå · ${Math.round(SCORE_WHEEL_NUKE_CHANCE * 100)}% NUKE`
+        killstreakMessageUntil = performance.now() + 2800
+        spawnBurst(cx, cy, 1.6)
+        triggerCheer()
+        return
+      }
+      if (typed === IS_CODE) {
+        if (penWorldActive || penSelectOpen) {
+          codesMessage = 'Ni är redan i undervärlden'
+          codesMessageUntil = performance.now() + 2000
+          codesInput = ''
+          return
+        }
+        if (bossMode || winner) {
+          codesMessage = 'Kan inte gå dit nu'
+          codesMessageUntil = performance.now() + 2000
+          codesInput = ''
+          return
+        }
+        closeCodes()
+        penWorldTriggered = true
+        startPenWorld()
         return
       }
       codesMessage = 'Fel kod'
@@ -5332,7 +5873,7 @@ function FightingBalls() {
         {
           id: 'lifeDrinkBlue',
           title: 'Livedryck',
-          desc: `B · 2 · +${LIFE_DRINK_HEAL} liv (fullt = +max)`,
+          desc: `B · 3 · +${LIFE_DRINK_HEAL} liv (fullt = +max)`,
           cost: shopPrice(LIFE_DRINK_COST),
           side: 'Blå',
           owned: inventory.lifeDrinkBlue,
@@ -5368,7 +5909,7 @@ function FightingBalls() {
         {
           id: 'susBlue',
           title: 'Sus',
-          desc: `B · 0 · radie · ${SUS_DAMAGE}/sek · 10s`,
+          desc: `B · 5 · radie · ${SUS_DAMAGE}/sek · 10s`,
           cost: shopPrice(SUS_COST),
           side: 'Blå',
           owned: inventory.susBlue,
@@ -6020,7 +6561,13 @@ function FightingBalls() {
 
       ctx.font = 'bold 16px Figtree, sans-serif'
       ctx.fillStyle = 'rgba(255,255,255,0.55)'
-      ctx.fillText(`först till ${WIN_SCORE} · shop 10/15/20… · grön boss ${BOSS_SCORE}`, width * 0.5, 28)
+      ctx.fillText(
+        penWorldActive
+          ? `UNDERVÄRLDEN · eld/is · först till ${WIN_SCORE}`
+          : `först till ${WIN_SCORE} · shop 10/15/20… · grön boss ${BOSS_SCORE} · undervärld ${PEN_WORLD_AT}`,
+        width * 0.5,
+        28,
+      )
 
       if (killstreakMessage && performance.now() < killstreakMessageUntil) {
         ctx.font = 'bold 20px Figtree, sans-serif'
@@ -6069,6 +6616,16 @@ function FightingBalls() {
       codesOpen = false
       pendingBossAfterShop = false
       pendingWinAfterShop = null
+      penWorldActive = false
+      penWorldTriggered = false
+      pendingPenWorld = false
+      penSelectOpen = false
+      penSelectPausedAt = 0
+      pickPenRed = null
+      pickPenBlue = null
+      penBolts.length = 0
+      inventory.penRed = null
+      inventory.penBlue = null
       moggerUntil = 0
       moggerNextTick = 0
       moggerOwner = null
@@ -6171,8 +6728,18 @@ function FightingBalls() {
       ctx.strokeText(`×${redCoins}`, 48, 98)
       ctx.fillText(`×${redCoins}`, 48, 98)
 
-      const redW = eventPistolActive ? 'pistol' : inventory.weaponRed
-      const redLabel = eventPistolActive
+      const redW = penWorldActive
+        ? inventory.penRed === 'ice'
+          ? 'penIce'
+          : 'penFire'
+        : eventPistolActive
+          ? 'pistol'
+          : inventory.weaponRed
+      const redLabel = penWorldActive
+        ? inventory.penRed === 'ice'
+          ? 'Is · Q'
+          : 'Eld · Q'
+        : eventPistolActive
         ? 'Event-pistol · Q'
         : nerminPower && redW !== 'rpg' && redW !== 'sniper' && redW !== 'bow' && redW !== 'nokia' && redW !== 'pistol' && redW !== 'hammer'
           ? 'Armar/ben · Q'
@@ -6193,7 +6760,7 @@ function FightingBalls() {
                         : redW === 'foot'
                           ? 'Fot · Q'
                           : redW === 'hammer'
-                            ? `Hammare · Q · G väg (${WALL_MAX})`
+                            ? `Hammare · Q · E väg (${WALL_MAX})`
                             : ''
       if (redLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
@@ -6204,8 +6771,8 @@ function FightingBalls() {
       if (inventory.scoreRewardRed === 'nuke' && !inventory.nukeUsedRed) {
         ctx.font = '600 12px Figtree, sans-serif'
         ctx.fillStyle = '#38bdf8'
-        ctx.strokeText('NUKE · E', 28, 142)
-        ctx.fillText('NUKE · E', 28, 142)
+        ctx.strokeText('NUKE · T', 28, 142)
+        ctx.fillText('NUKE · T', 28, 142)
       }
       if (inventory.petRed) {
         const petY = inventory.scoreRewardRed === 'nuke' && !inventory.nukeUsedRed ? 160 : 142
@@ -6228,8 +6795,18 @@ function FightingBalls() {
       ctx.strokeText(`×${blueCoins}`, width - 48, 98)
       ctx.fillText(`×${blueCoins}`, width - 48, 98)
 
-      const blueW = eventPistolActive ? 'pistol' : inventory.weaponBlue
-      const blueLabel = eventPistolActive
+      const blueW = penWorldActive
+        ? inventory.penBlue === 'ice'
+          ? 'penIce'
+          : 'penFire'
+        : eventPistolActive
+          ? 'pistol'
+          : inventory.weaponBlue
+      const blueLabel = penWorldActive
+        ? inventory.penBlue === 'ice'
+          ? 'Is · 1'
+          : 'Eld · 1'
+        : eventPistolActive
         ? 'Event-pistol · 1'
         : nerminPower && blueW !== 'rpg' && blueW !== 'sniper' && blueW !== 'bow' && blueW !== 'nokia' && blueW !== 'pistol' && blueW !== 'hammer'
           ? 'Armar/ben · 1'
@@ -6250,7 +6827,7 @@ function FightingBalls() {
                         : blueW === 'ping'
                           ? 'Pingis · 1'
                           : blueW === 'hammer'
-                            ? `Hammare · 1 · 8 väg (${WALL_MAX})`
+                            ? `Hammare · 1 · 2 väg (${WALL_MAX})`
                             : ''
       if (blueLabel) {
         ctx.font = '600 13px Figtree, sans-serif'
@@ -6297,21 +6874,25 @@ function FightingBalls() {
 
     function drawArena(time) {
       const moggerActive = moggerUntil > 0 && time < moggerUntil
-      if (moggerActive) {
+      if (moggerActive || penWorldActive) {
         ctx.fillStyle = '#000000'
         ctx.fillRect(0, 0, width, height)
         // Svart void-bana: bara en tunn ring så man ser kanten
-        ctx.strokeStyle = 'rgba(255,255,255,0.12)'
+        ctx.strokeStyle = penWorldActive ? 'rgba(120, 200, 255, 0.18)' : 'rgba(255,255,255,0.12)'
         ctx.lineWidth = 3
         ctx.beginPath()
         ctx.arc(cx, cy, Math.max(1, arenaR), 0, Math.PI * 2)
         ctx.stroke()
-        const leftSec = Math.max(0, Math.ceil((moggerUntil - time) / 1000))
-        ctx.fillStyle = 'rgba(255,255,255,0.55)'
+        ctx.fillStyle = penWorldActive ? 'rgba(180, 220, 255, 0.55)' : 'rgba(255,255,255,0.55)'
         ctx.font = 'bold 22px Syne, sans-serif'
         ctx.textAlign = 'center'
         ctx.textBaseline = 'top'
-        ctx.fillText(`MOGER FACE · ${leftSec}s`, cx, cy - arenaR - 36)
+        if (penWorldActive) {
+          ctx.fillText('UNDERVÄRLDEN', cx, cy - arenaR - 36)
+        } else {
+          const leftSec = Math.max(0, Math.ceil((moggerUntil - time) / 1000))
+          ctx.fillText(`MOGER FACE · ${leftSec}s`, cx, cy - arenaR - 36)
+        }
         return
       }
 
@@ -7148,7 +7729,8 @@ function FightingBalls() {
           nokiaDialOpen ||
           killstreakOpen ||
           scoreWheelOpen ||
-          petSelectOpen
+          petSelectOpen ||
+          penSelectOpen
         ) {
           last = now
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -7191,11 +7773,12 @@ function FightingBalls() {
             drawPet(pets[i])
           }
           drawNukes()
+          drawPenBolts()
           drawScores()
           drawShopButton()
           drawGoldCoins()
           drawNokiaDialButtons()
-          drawRespawnCountdowns(shopPausedAt || weaponSelectPausedAt || now)
+          drawRespawnCountdowns(shopPausedAt || weaponSelectPausedAt || penSelectPausedAt || now)
           drawBossHud()
           drawShop()
           drawCodes()
@@ -7204,6 +7787,7 @@ function FightingBalls() {
           drawKillstreakWheel()
           drawScoreWheel()
           drawPetSelect()
+          drawPenSelect()
           return
         }
 
@@ -7223,6 +7807,7 @@ function FightingBalls() {
         updateBodyguards(dt, now)
         updatePets(dt, now)
         updateNukes(dt)
+        updatePenBolts(dt)
         updateFarts(dt, now)
         updateBurns(dt, now)
         updatePolice(dt)
@@ -7345,6 +7930,7 @@ function FightingBalls() {
         }
 
         drawNukes()
+        drawPenBolts()
 
         ctx.restore()
 
@@ -7362,6 +7948,7 @@ function FightingBalls() {
         drawKillstreakWheel()
         drawScoreWheel()
         drawPetSelect()
+        drawPenSelect()
 
         if (nukeFlash > 0.02) {
           ctx.fillStyle = `rgba(180, 230, 255, ${nukeFlash * 0.55})`
@@ -7399,6 +7986,30 @@ function FightingBalls() {
       }
       fighter.squash = 0.35
       spawnBurst(fighter.x, fighter.y, 1.1)
+    }
+
+    function teleportForward(fighter) {
+      if (!fighter || fighter.eliminated || fighter.lives <= 0) return false
+      const now = performance.now()
+      if (now < (fighter.teleportReadyAt || 0)) return false
+      let ang =
+        typeof fighter.knifeAngle === 'number'
+          ? fighter.knifeAngle
+          : (fighter.face || 1) > 0
+            ? 0
+            : Math.PI
+      const spd = Math.hypot(fighter.vx, fighter.vy)
+      if (spd > 0.4) ang = Math.atan2(fighter.vy, fighter.vx)
+      const fromX = fighter.x
+      const fromY = fighter.y
+      fighter.x += Math.cos(ang) * TELEPORT_DIST
+      fighter.y += Math.sin(ang) * TELEPORT_DIST
+      keepInArena(fighter)
+      fighter.teleportReadyAt = now + TELEPORT_COOLDOWN
+      fighter.squash = 0.35
+      spawnBurst(fromX, fromY, 0.7)
+      spawnBurst(fighter.x, fighter.y, 0.9)
+      return true
     }
 
     function useMcShield(fighter, side) {
@@ -7503,6 +8114,21 @@ function FightingBalls() {
         }
         return
       }
+      if (penSelectOpen) {
+        e.preventDefault()
+        if (!e.repeat) {
+          if (k === 'q') applyPenPick('red', 'fire')
+          else if (k === 'e') applyPenPick('red', 'ice')
+          else if (k === '1' || e.code === 'Digit1' || e.code === 'Numpad1') {
+            applyPenPick('blue', 'fire')
+          } else if (k === '2' || e.code === 'Digit2' || e.code === 'Numpad2') {
+            applyPenPick('blue', 'ice')
+          } else if (e.key === 'Enter' || k === ' ') {
+            confirmPenSelect()
+          }
+        }
+        return
+      }
       if (codesOpen) {
         e.preventDefault()
         if (e.key === 'Enter') {
@@ -7526,7 +8152,10 @@ function FightingBalls() {
               typed === ALI_CODE ||
               typed === GRON_BOSS_CODE ||
               typed === MJOLK_CODE ||
-              typed === RED_COINS_CODE
+              typed === RED_COINS_CODE ||
+              typed === COINS_1000_CODE ||
+              typed === HJUL_CODE ||
+              typed === IS_CODE
             ) {
               submitCode()
             }
@@ -7534,7 +8163,7 @@ function FightingBalls() {
         }
         return
       }
-      if (shopOpen || scoreWheelOpen || killstreakOpen || petSelectOpen) return
+      if (shopOpen || scoreWheelOpen || killstreakOpen || petSelectOpen || penSelectOpen) return
       if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
         keys[k] = true
         e.preventDefault()
@@ -7562,24 +8191,19 @@ function FightingBalls() {
       }
       if (k === 'e' && !e.repeat) {
         e.preventDefault()
-        useNuke('red')
+        const player = fighters.find((f) => f.player)
+        if (player) placeWall(player)
         return
       }
       if (k === 'f' && !e.repeat) {
         e.preventDefault()
         const player = fighters.find((f) => f.player)
-        if (player) useMcShield(player, 'red')
+        if (player) teleportForward(player)
         return
       }
       if (k === 't' && !e.repeat) {
         e.preventDefault()
         useNuke('red')
-        return
-      }
-      if (k === 'g' && !e.repeat) {
-        e.preventDefault()
-        const player = fighters.find((f) => f.player)
-        if (player) placeWall(player)
         return
       }
       if (k === 'q' && !e.repeat) {
@@ -7605,13 +8229,13 @@ function FightingBalls() {
       if ((k === '2' || e.code === 'Digit2' || e.code === 'Numpad2') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
-        if (blue) useLifeDrink(blue, 'blue')
+        if (blue) placeWall(blue)
         return
       }
       if ((k === '3' || e.code === 'Digit3' || e.code === 'Numpad3') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
-        if (blue) useMcShield(blue, 'blue')
+        if (blue) useLifeDrink(blue, 'blue')
         return
       }
       if ((k === '4' || e.code === 'Digit4' || e.code === 'Numpad4') && !e.repeat) {
@@ -7624,21 +8248,21 @@ function FightingBalls() {
         usePetAbility('red')
         return
       }
+      if ((k === '5' || e.code === 'Digit5' || e.code === 'Numpad5') && !e.repeat) {
+        e.preventDefault()
+        const blue = fighters.find((f) => f.control === 'arrows')
+        if (blue) useSus(blue, 'blue')
+        return
+      }
       if ((k === '7' || e.code === 'Digit7' || e.code === 'Numpad7') && !e.repeat) {
         e.preventDefault()
         useNuke('blue')
         return
       }
-      if ((k === '8' || e.code === 'Digit8' || e.code === 'Numpad8') && !e.repeat) {
-        e.preventDefault()
-        const blue = fighters.find((f) => f.control === 'arrows')
-        if (blue) placeWall(blue)
-        return
-      }
       if ((k === '0' || e.code === 'Digit0' || e.code === 'Numpad0') && !e.repeat) {
         e.preventDefault()
         const blue = fighters.find((f) => f.control === 'arrows')
-        if (blue) useSus(blue, 'blue')
+        if (blue) teleportForward(blue)
         return
       }
     }
@@ -7724,6 +8348,20 @@ function FightingBalls() {
         return
       }
 
+      if (penSelectOpen) {
+        for (let i = penSelectHits.length - 1; i >= 0; i -= 1) {
+          const hit = penSelectHits[i]
+          if (!hitRect(px, py, hit)) continue
+          if (hit.id === 'start') confirmPenSelect()
+          else if (hit.id === 'red-fire') applyPenPick('red', 'fire')
+          else if (hit.id === 'red-ice') applyPenPick('red', 'ice')
+          else if (hit.id === 'blue-fire') applyPenPick('blue', 'fire')
+          else if (hit.id === 'blue-ice') applyPenPick('blue', 'ice')
+          return
+        }
+        return
+      }
+
       if (codesOpen) {
         closeCodes()
         return
@@ -7781,7 +8419,7 @@ function FightingBalls() {
         return
       }
 
-      if (winner || bossMode) return
+      if (winner || bossMode || penWorldActive) return
 
       if (hitRect(px, py, shopButton)) {
         openShop()
@@ -7811,6 +8449,9 @@ function FightingBalls() {
       }
       if (weaponSelectOpen) {
         over = weaponSelectHits.some((h) => hitRect(px, py, h))
+      }
+      if (penSelectOpen) {
+        over = penSelectHits.some((h) => hitRect(px, py, h)) || true
       }
       if (nokiaDialOpen) {
         over = nokiaDialHits.some((h) => hitRect(px, py, h)) || true
