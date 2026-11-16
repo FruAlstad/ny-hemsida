@@ -235,17 +235,19 @@ const CAT_POUNCE_SPEED = 20
 const PEN_WORLD_AT = 30
 const PEN_FIRE_DAMAGE = 3
 const PEN_ICE_DAMAGE = 3
-const PEN_COOLDOWN = 420
+const PEN_COOLDOWN = 1000
+const PEN_ICE_COOLDOWN = 1200
 const PEN_SPEED = 13
 const PEN_FIRE_RADIUS = 26
 const PEN_ICE_LEN = 56
 const PEN_ICE_WIDTH = 16
-const ICE_FREEZE_MS = 500
+const ICE_FREEZE_MS = 100
+const PEN_WORLD_LIVES = 16
 const MAGMA_COST = 50
 const MAGMA_DAMAGE = 3
 const MAGMA_SPEED = 11
 const MAGMA_RADIUS = 16
-const MAGMA_COOLDOWN = 700
+const MAGMA_COOLDOWN = 1000
 const MAGMA_POOL_RADIUS = 78
 const MAGMA_POOL_DAMAGE = 2
 const MAGMA_POOL_DURATION_MS = 4500
@@ -253,12 +255,12 @@ const MAGMA_POOL_TICK_MS = 500
 const WIND_COST = 50
 const WIND_SPEED = 13
 const WIND_RADIUS = 20
-const WIND_COOLDOWN = 520
-const WIND_KNOCKBACK = 22
+const WIND_COOLDOWN = 1000
+const WIND_KNOCKBACK = 110
+const WIND_PUSH_DIST = 170
 const WIND_SHOTS_PER_LIGHTNING = 3
 const LIGHTNING_DAMAGE = 4
-const LIGHTNING_RADIUS = 14
-const LIGHTNING_SPEED = 16
+const SKY_LIGHTNING_MS = 420
 
 const PALETTE = [
   { color: '#ff4d3a', glow: '#ff8a70' },
@@ -304,6 +306,7 @@ function FightingBalls() {
     const walls = []
     const nukes = []
     const penBolts = []
+    const skyStrikes = []
     let nukeFlash = 0 // kall blåvit flash vid träff
     let leonCallsRed = 0
     let leonCallsBlue = 0
@@ -934,7 +937,8 @@ function FightingBalls() {
         }
 
         const speed = Math.hypot(ball.vx, ball.vy)
-        const max = PLAYER_MAX_SPEED
+        const max =
+          now < (ball.knockbackUntil || 0) ? PLAYER_MAX_SPEED * 4.5 : PLAYER_MAX_SPEED
         if (speed > max) {
           ball.vx = (ball.vx / speed) * max
           ball.vy = (ball.vy / speed) * max
@@ -964,9 +968,11 @@ function FightingBalls() {
         ball.vy *= bossAi ? 0.96 : 0.99
 
         const speed = Math.hypot(ball.vx, ball.vy)
-        if (speed > maxSpeed) {
-          ball.vx = (ball.vx / speed) * maxSpeed
-          ball.vy = (ball.vy / speed) * maxSpeed
+        const cap =
+          now < (ball.knockbackUntil || 0) ? Math.max(maxSpeed * 4.5, 42) : maxSpeed
+        if (speed > cap) {
+          ball.vx = (ball.vx / speed) * cap
+          ball.vy = (ball.vy / speed) * cap
         }
       }
 
@@ -3174,7 +3180,11 @@ function FightingBalls() {
 
     function reviveFighter(ball, now) {
       const isRed = ball.player || ball._bossSide === 'red'
-      ball.maxLives = isRed ? PLAYER_LIVES : ENEMY_LIVES
+      ball.maxLives = penWorldActive
+        ? PEN_WORLD_LIVES
+        : isRed
+          ? PLAYER_LIVES
+          : ENEMY_LIVES
       ball.lives = ball.maxLives
       ball.vx = 0
       ball.vy = 0
@@ -5000,6 +5010,7 @@ function FightingBalls() {
       walls.length = 0
       nukes.length = 0
       penBolts.length = 0
+      skyStrikes.length = 0
       poisonPools.length = 0
       inventory.scoreRewardRed = null
       inventory.scoreRewardBlue = null
@@ -5019,7 +5030,7 @@ function FightingBalls() {
       inventory.windShotsBlue = 0
       pickPenRed = null
       pickPenBlue = null
-      // Alla spelare kommer hit tillsammans
+      // Alla spelare kommer hit tillsammans · 16 liv
       const now = performance.now()
       for (let i = 0; i < fighters.length; i += 1) {
         const f = fighters[i]
@@ -5027,6 +5038,8 @@ function FightingBalls() {
         if (f.eliminated || f.lives <= 0) {
           reviveFighter(f, now)
         }
+        f.maxLives = PEN_WORLD_LIVES
+        f.lives = PEN_WORLD_LIVES
         f.freezeUntil = 0
         f.knifeEquipped = false
         f.knifeSwingUntil = 0
@@ -5215,7 +5228,7 @@ function FightingBalls() {
       const ny = Math.sin(angle)
       const isIce = element === 'ice'
       const dmg = isIce ? PEN_ICE_DAMAGE : PEN_FIRE_DAMAGE
-      attacker[readyKey] = now + PEN_COOLDOWN
+      attacker[readyKey] = now + (isIce ? PEN_ICE_COOLDOWN : PEN_COOLDOWN)
       attacker.knifeEquipped = false
       attacker.knifeSwingUntil = 0
       attacker.meleeKind = isIce ? 'penIce' : 'penFire'
@@ -5285,6 +5298,80 @@ function FightingBalls() {
       spawnBurst(attacker.x + nx * hold, attacker.y + ny * hold, 0.7)
     }
 
+    function getWindTarget(attacker) {
+      if (bossMode) return fighters.find((f) => f.isBoss && !f.eliminated) || null
+      return fighters.find((f) => f !== attacker && !f.eliminated && !f.isBoss) || null
+    }
+
+    function strikeSkyLightning(attacker, target) {
+      if (!target || target.eliminated) return
+      const now = performance.now()
+      skyStrikes.push({
+        x: target.x,
+        y: target.y,
+        topY: Math.min(target.y - arenaR * 0.85, cy - arenaR - 30),
+        life: 1,
+        until: now + SKY_LIGHTNING_MS,
+      })
+      if (!isShielded(target, now)) {
+        target.lives -= LIGHTNING_DAMAGE
+        if (target.isBoss) addBossDamage(attacker, LIGHTNING_DAMAGE)
+      }
+      target.squash = Math.max(target.squash, 0.65)
+      spawnBurst(target.x, target.y, 2.2)
+      shake = Math.min(18, shake + 10)
+      nukeFlash = Math.max(nukeFlash, 0.65)
+    }
+
+    function updateSkyStrikes(now = performance.now()) {
+      for (let i = skyStrikes.length - 1; i >= 0; i -= 1) {
+        const s = skyStrikes[i]
+        s.life = Math.max(0, (s.until - now) / SKY_LIGHTNING_MS)
+        if (now >= s.until) skyStrikes.splice(i, 1)
+      }
+    }
+
+    function drawSkyStrikes(now = performance.now()) {
+      for (let i = 0; i < skyStrikes.length; i += 1) {
+        const s = skyStrikes[i]
+        const life = Math.max(0, (s.until - now) / SKY_LIGHTNING_MS)
+        const jag = (1 - life) * 8
+        ctx.save()
+        ctx.globalAlpha = 0.35 + life * 0.65
+        const glow = ctx.createLinearGradient(s.x, s.topY, s.x, s.y)
+        glow.addColorStop(0, 'rgba(255,255,255,0)')
+        glow.addColorStop(0.2, 'rgba(200,230,255,0.85)')
+        glow.addColorStop(1, 'rgba(255,255,180,1)')
+        ctx.strokeStyle = glow
+        ctx.lineWidth = 10 * life + 2
+        ctx.lineCap = 'round'
+        ctx.beginPath()
+        ctx.moveTo(s.x + jag, s.topY)
+        ctx.lineTo(s.x - 10, s.topY + (s.y - s.topY) * 0.28)
+        ctx.lineTo(s.x + 14, s.topY + (s.y - s.topY) * 0.52)
+        ctx.lineTo(s.x - 8, s.topY + (s.y - s.topY) * 0.74)
+        ctx.lineTo(s.x, s.y)
+        ctx.stroke()
+        ctx.strokeStyle = `rgba(255,255,255,${0.7 + life * 0.3})`
+        ctx.lineWidth = 3
+        ctx.beginPath()
+        ctx.moveTo(s.x, s.topY)
+        ctx.lineTo(s.x - 6, s.topY + (s.y - s.topY) * 0.3)
+        ctx.lineTo(s.x + 8, s.topY + (s.y - s.topY) * 0.55)
+        ctx.lineTo(s.x - 4, s.topY + (s.y - s.topY) * 0.78)
+        ctx.lineTo(s.x, s.y)
+        ctx.stroke()
+        const blast = ctx.createRadialGradient(s.x, s.y, 2, s.x, s.y, 55)
+        blast.addColorStop(0, `rgba(255,255,220,${0.7 * life})`)
+        blast.addColorStop(1, 'rgba(100,180,255,0)')
+        ctx.fillStyle = blast
+        ctx.beginPath()
+        ctx.arc(s.x, s.y, 55, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      }
+    }
+
     function shootWind(attacker, slot = 'q') {
       if (!attacker || attacker.eliminated || attacker.lives <= 0) return
       if (attacker.control !== 'arrows' && attacker.control !== 'wasd') return
@@ -5296,35 +5383,37 @@ function FightingBalls() {
       if (side === 'red') inventory.windShotsRed += 1
       else inventory.windShotsBlue += 1
       const shots = side === 'red' ? inventory.windShotsRed : inventory.windShotsBlue
-      const isLightning = shots % WIND_SHOTS_PER_LIGHTNING === 0
+      const callLightning = shots % WIND_SHOTS_PER_LIGHTNING === 0
       const angle = aimAtOpponent(attacker)
       const nx = Math.cos(angle)
       const ny = Math.sin(angle)
       attacker[readyKey] = now + WIND_COOLDOWN
       attacker.knifeEquipped = false
       attacker.knifeSwingUntil = 0
-      attacker.meleeKind = isLightning ? 'penLightning' : 'penWind'
+      attacker.meleeKind = 'penWind'
       attacker.knifeAngle = angle
       attacker.squash = 0.28
       attacker.face = nx >= 0 ? 1 : -1
-      const speed = isLightning ? LIGHTNING_SPEED : WIND_SPEED
-      const r = isLightning ? LIGHTNING_RADIUS : WIND_RADIUS
       const hold = getRadius(attacker) + 10
       penBolts.push({
-        x: attacker.x + nx * (hold + r * 0.35),
-        y: attacker.y + ny * (hold + r * 0.35),
-        vx: nx * speed + attacker.vx * 0.12,
-        vy: ny * speed + attacker.vy * 0.12,
-        r,
+        x: attacker.x + nx * (hold + WIND_RADIUS * 0.35),
+        y: attacker.y + ny * (hold + WIND_RADIUS * 0.35),
+        vx: nx * WIND_SPEED + attacker.vx * 0.12,
+        vy: ny * WIND_SPEED + attacker.vy * 0.12,
+        r: WIND_RADIUS,
         angle,
         life: 2.2,
         owner: attacker,
-        damage: isLightning ? LIGHTNING_DAMAGE : 0,
-        element: isLightning ? 'lightning' : 'wind',
-        knockback: WIND_KNOCKBACK * (isLightning ? 1.15 : 1),
+        damage: 0,
+        element: 'wind',
+        knockback: WIND_KNOCKBACK,
+        pushDist: WIND_PUSH_DIST,
       })
-      spawnBurst(attacker.x + nx * hold, attacker.y + ny * hold, isLightning ? 1.1 : 0.65)
-      if (isLightning) nukeFlash = Math.max(nukeFlash, 0.25)
+      spawnBurst(attacker.x + nx * hold, attacker.y + ny * hold, 0.65)
+      if (callLightning) {
+        const target = getWindTarget(attacker)
+        if (target) strikeSkyLightning(attacker, target)
+      }
     }
 
     function updatePenBolts(dt) {
@@ -5393,19 +5482,6 @@ function FightingBalls() {
             fire: false,
           })
         }
-        if (b.element === 'lightning' && Math.random() < 0.9) {
-          particles.push({
-            x: b.x + (Math.random() - 0.5) * 12,
-            y: b.y + (Math.random() - 0.5) * 12,
-            vx: (Math.random() - 0.5) * 4,
-            vy: (Math.random() - 0.5) * 4,
-            life: 0.55,
-            decay: 0.05,
-            size: 3 + Math.random() * 5,
-            color: Math.random() > 0.4 ? [255, 255, 180] : [120, 200, 255],
-            fire: false,
-          })
-        }
         if (Math.hypot(b.x - cx, b.y - cy) > arenaR + 60 || b.life <= 0) {
           if (b.element === 'magma') spawnMagmaPool(b.x, b.y)
           penBolts.splice(i, 1)
@@ -5425,12 +5501,18 @@ function FightingBalls() {
               if (f.isBoss) addBossDamage(b.owner, b.damage)
             }
             f.squash = 0.5
-            if (b.element === 'wind' || b.element === 'lightning') {
+            if (b.element === 'wind') {
               const spd = Math.hypot(b.vx, b.vy) || 1
+              const nx = b.vx / spd
+              const ny = b.vy / spd
               const kb = b.knockback || WIND_KNOCKBACK
-              f.vx += (b.vx / spd) * kb
-              f.vy += (b.vy / spd) * kb
-              if (b.element === 'lightning') nukeFlash = Math.max(nukeFlash, 0.55)
+              const push = b.pushDist || WIND_PUSH_DIST
+              f.x += nx * push
+              f.y += ny * push
+              f.vx += nx * kb
+              f.vy += ny * kb
+              f.knockbackUntil = performance.now() + 550
+              keepInArena(f)
             } else {
               f.vx += b.vx * 0.2
               f.vy += b.vy * 0.2
@@ -5457,17 +5539,15 @@ function FightingBalls() {
               })
             }
             const burst =
-              b.element === 'lightning'
-                ? 2.1
-                : b.element === 'wind'
-                  ? 1.3
-                  : b.element === 'magma'
-                    ? 1.8
-                    : b.element === 'fire'
-                      ? 1.6
-                      : 1.4
+              b.element === 'wind'
+                ? 1.5
+                : b.element === 'magma'
+                  ? 1.8
+                  : b.element === 'fire'
+                    ? 1.6
+                    : 1.4
             spawnBurst(b.x, b.y, burst)
-            shake = Math.min(16, shake + (b.element === 'lightning' ? 9 : 6))
+            shake = Math.min(16, shake + (b.element === 'wind' ? 8 : 6))
             hit = true
             break
           }
@@ -5544,28 +5624,6 @@ function FightingBalls() {
           ctx.moveTo(-b.r * 0.4, -b.r * 0.55)
           ctx.quadraticCurveTo(b.r * 0.1, 0, -b.r * 0.4, b.r * 0.55)
           ctx.stroke()
-        } else if (b.element === 'lightning') {
-          const glow = ctx.createRadialGradient(0, 0, 1, 0, 0, b.r * 3.5)
-          glow.addColorStop(0, 'rgba(255,255,220,1)')
-          glow.addColorStop(0.4, 'rgba(180,220,255,0.7)')
-          glow.addColorStop(1, 'rgba(80,120,255,0)')
-          ctx.fillStyle = glow
-          ctx.beginPath()
-          ctx.arc(0, 0, b.r * 3.5, 0, Math.PI * 2)
-          ctx.fill()
-          ctx.fillStyle = '#fef9c3'
-          ctx.strokeStyle = '#38bdf8'
-          ctx.lineWidth = 2
-          ctx.beginPath()
-          ctx.moveTo(-2, -b.r * 1.1)
-          ctx.lineTo(b.r * 0.35, -b.r * 0.15)
-          ctx.lineTo(2, -b.r * 0.1)
-          ctx.lineTo(b.r * 0.55, b.r * 1.1)
-          ctx.lineTo(-b.r * 0.2, b.r * 0.2)
-          ctx.lineTo(2, b.r * 0.15)
-          ctx.closePath()
-          ctx.fill()
-          ctx.stroke()
         } else {
           // Vass isbit · kall glow
           const len = PEN_ICE_LEN
@@ -5613,7 +5671,8 @@ function FightingBalls() {
     }
 
     function openMagicShop() {
-      if (!penWorldActive || magicShopOpen || magicBagOpen || penSelectOpen || winner) return
+      if (!penWorldActive || magicShopOpen || magicBagOpen || codesOpen || penSelectOpen || winner)
+        return
       clearKeys()
       if (!shopPausedAt) shopPausedAt = performance.now()
       magicShopOpen = true
@@ -5629,7 +5688,8 @@ function FightingBalls() {
     }
 
     function openMagicBag() {
-      if (!penWorldActive || magicBagOpen || magicShopOpen || penSelectOpen || winner) return
+      if (!penWorldActive || magicBagOpen || magicShopOpen || codesOpen || penSelectOpen || winner)
+        return
       clearKeys()
       if (!shopPausedAt) shopPausedAt = performance.now()
       magicBagOpen = true
@@ -5750,7 +5810,7 @@ function FightingBalls() {
               title: 'Vindkraft · Röd',
               owned: inventory.windRed,
               can: !inventory.windRed && canAfford('red', WIND_COST),
-              sub: 'Putar · blixt var 3 · 50 🪙',
+              sub: 'Putar långt · blixt från himlen · 50',
             },
             {
               id: 'windBlue',
@@ -5758,7 +5818,7 @@ function FightingBalls() {
               title: 'Vindkraft · Blå',
               owned: inventory.windBlue,
               can: !inventory.windBlue && canAfford('blue', WIND_COST),
-              sub: 'Putar · blixt var 3 · 50 🪙',
+              sub: 'Putar långt · blixt från himlen · 50',
             },
           ],
         },
@@ -5931,17 +5991,18 @@ function FightingBalls() {
 
     function drawShopButton() {
       if (penWorldActive) {
-        const w = 168
-        const invW = 120
+        const w = 158
+        const invW = 112
+        const codesW = 100
         const h = 42
-        const gap = 12
-        const total = w + gap + invW
+        const gap = 10
+        const total = w + gap + invW + gap + codesW
         const x = width * 0.5 - total * 0.5
         const y = Math.max(96, cy - arenaR - 58)
         magicShopButton = { x, y, w, h }
         magicBagButton = { x: x + w + gap, y, w: invW, h }
+        codesButton = { x: x + w + gap + invW + gap, y, w: codesW, h }
         shopButton = { x: -999, y: -999, w: 0, h: 0 }
-        codesButton = { x: -999, y: -999, w: 0, h: 0 }
         ctx.save()
         const grad = ctx.createLinearGradient(x, y, x, y + h)
         grad.addColorStop(0, '#fb923c')
@@ -5955,7 +6016,7 @@ function FightingBalls() {
         ctx.fill()
         ctx.stroke()
         ctx.fillStyle = '#1c0a00'
-        ctx.font = 'bold 15px Syne, sans-serif'
+        ctx.font = 'bold 14px Syne, sans-serif'
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillText('MAGISKA SHOPEN', x + w * 0.5, y + h * 0.5)
@@ -5972,8 +6033,22 @@ function FightingBalls() {
         ctx.fill()
         ctx.stroke()
         ctx.fillStyle = '#0f172a'
-        ctx.font = 'bold 14px Syne, sans-serif'
+        ctx.font = 'bold 13px Syne, sans-serif'
         ctx.fillText('INVENTORY', magicBagButton.x + invW * 0.5, y + h * 0.5)
+
+        const cg = ctx.createLinearGradient(codesButton.x, y, codesButton.x, y + h)
+        cg.addColorStop(0, '#a78bfa')
+        cg.addColorStop(1, '#6d28d9')
+        ctx.fillStyle = cg
+        ctx.strokeStyle = '#ddd6fe'
+        ctx.beginPath()
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(codesButton.x, y, codesW, h, 10)
+        else ctx.rect(codesButton.x, y, codesW, h)
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = '#f5f3ff'
+        ctx.font = 'bold 14px Syne, sans-serif'
+        ctx.fillText('CODES', codesButton.x + codesW * 0.5, y + h * 0.5)
         ctx.restore()
         return
       }
@@ -6028,7 +6103,16 @@ function FightingBalls() {
     }
 
     function openCodes() {
-      if (codesOpen || shopOpen || weaponSelectOpen || winner || bossMode || penWorldActive) return
+      if (
+        codesOpen ||
+        shopOpen ||
+        magicShopOpen ||
+        magicBagOpen ||
+        weaponSelectOpen ||
+        winner ||
+        bossMode
+      )
+        return
       clearKeys()
       shopPausedAt = performance.now()
       codesOpen = true
@@ -7451,6 +7535,7 @@ function FightingBalls() {
       pickPenRed = null
       pickPenBlue = null
       penBolts.length = 0
+      skyStrikes.length = 0
       inventory.penRed = null
       inventory.penBlue = null
       inventory.magmaRed = false
@@ -8647,6 +8732,7 @@ function FightingBalls() {
           }
           drawNukes()
           drawPenBolts()
+          drawSkyStrikes(shopPausedAt || now)
           drawScores()
           drawShopButton()
           drawGoldCoins()
@@ -8683,6 +8769,7 @@ function FightingBalls() {
         updatePets(dt, now)
         updateNukes(dt)
         updatePenBolts(dt)
+        updateSkyStrikes(now)
         updateFarts(dt, now)
         updateBurns(dt, now)
         updatePolice(dt)
@@ -8806,6 +8893,7 @@ function FightingBalls() {
 
         drawNukes()
         drawPenBolts()
+        drawSkyStrikes(now)
 
         ctx.restore()
 
@@ -9371,6 +9459,10 @@ function FightingBalls() {
         }
         if (hitRect(px, py, magicBagButton)) {
           openMagicBag()
+          return
+        }
+        if (hitRect(px, py, codesButton)) {
+          openCodes()
         }
         return
       }
